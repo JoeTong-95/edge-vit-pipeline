@@ -11,7 +11,7 @@ This project uses Docker to provide a consistent development environment.
 
 From the project root directory:
 
-docker build -t vision-dev -f docker/Dockerfile .
+```docker build -t vision-dev -f Dockerfile .```
 
 This builds the development image `vision-dev`.
 
