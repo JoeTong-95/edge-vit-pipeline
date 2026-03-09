@@ -1,4 +1,6 @@
-FROM python:3.10-bookworm
+FROM pytorch/pytorch:2.2.1-cuda12.1-cudnn8-runtime
+#CUDA version specified 12.1
+
 
 WORKDIR /app
 
