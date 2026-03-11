@@ -1,0 +1,1 @@
+docker run -it --gpus all -v ${PWD}:/app vision-dev:latest bash
