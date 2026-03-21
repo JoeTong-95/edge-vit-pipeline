@@ -110,7 +110,7 @@ Helper script:
 On the Jetson:
 
 ```bash
-docker run -it --gpus all -v ${PWD}:/app vision-jetson:latest bash
+docker run -it --runtime=nvidia -v ${PWD}:/app vision-jetson:latest bash
 ```
 
 Helper script:
@@ -145,6 +145,7 @@ huggingface-cli login
 - The repository is mounted from the host, so code changes do not require rebuilding the image.
 - Rebuild when `docker/requirements.txt` or the relevant Dockerfile changes.
 - `docker/Dockerfile.jetson` is for ARM64 Jetson systems and will not build normally on an x86 Docker Desktop environment.
-- `run-docker-jetson`, `run-docker-linux`, and `run-docker-win.bat` request GPU passthrough with `--gpus all`.
+- `run-docker-jetson` requests GPU access with `--runtime=nvidia`, which is the Jetson-compatible runtime setting.
+- `run-docker-linux` and `run-docker-win.bat` request GPU passthrough with `--gpus all`.
 - `run-docker-mac` intentionally runs without GPU flags.
 - On Linux and Jetson, run `chmod +x build-docker-dev-machine build-docker-jetson run-docker-linux run-docker-mac run-docker-jetson` once after cloning if execute bits are missing.
