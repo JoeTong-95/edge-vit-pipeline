@@ -3,106 +3,148 @@ Enabling VLM applications on edge devices such as Jetson Orin Nano.
 
 # Docker update and usage
 
-All Docker-related files now live under the `docker/` folder:
+All Docker-related files live under the `docker/` folder:
 
 - `docker/Dockerfile`
+- `docker/Dockerfile.dev`
+- `docker/Dockerfile.jetson`
 - `docker/requirements.txt`
-- `docker/run-lix-docker-lateset-gpu-current_dir.bash`
-- `docker/run-win--docker-lateset-gpu-current_dir.bat`
 
 ## Docker environment setup
 
-This project uses Docker to provide a consistent development environment.
+This project uses two Docker images:
 
-### Build the Docker image
+- `docker/Dockerfile` or `docker/Dockerfile.dev` for the main development machine
+- `docker/Dockerfile.jetson` for Jetson verification
+
+Both Dockerfiles can live in the same folder. Choose which one to build with `-f`.
+
+Current convention:
+
+- `docker/Dockerfile` is the default dev-machine Dockerfile
+- `docker/Dockerfile.dev` is the explicit dev-machine Dockerfile
+- `docker/Dockerfile.jetson` is the Jetson-only Dockerfile
+
+### Build on the dev machine
 
 Run this from the project root directory:
 
 ```bash
-docker build -t vision-dev:latest -f docker/Dockerfile .
+docker build --pull -t vision-dev:latest -f docker/Dockerfile docker
 ```
 
-This builds the development image `vision-dev:latest`.
-
-### Run the container
-
-From the project root directory:
-
-Linux/macOS:
+Equivalent explicit command:
 
 ```bash
-bash docker/run-lix-docker-lateset-gpu-current_dir.bash
+docker build --pull -t vision-dev:latest -f docker/Dockerfile.dev docker
+```
+
+Helper scripts:
+
+Linux:
+
+```bash
+./build-docker-dev-machine
 ```
 
 Windows:
 
-```bat
-docker\run-win--docker-lateset-gpu-current_dir.bat
+```powershell
+.\build-docker-dev-machine.bat
 ```
 
-Equivalent direct commands:
+### Build on the Jetson
 
-Linux/macOS:
+Run this from the project root directory on the Jetson:
+
+```bash
+docker build --pull -t vision-jetson:latest -f docker/Dockerfile.jetson docker
+```
+
+Helper script:
+
+```bash
+./build-docker-jetson
+```
+
+### Run the dev-machine container
+
+Linux:
 
 ```bash
 docker run -it --gpus all -v ${PWD}:/app vision-dev:latest bash
 ```
 
+Helper script:
+
+```bash
+./run-docker-linux
+```
+
+macOS:
+
+```bash
+docker run -it -v "$(pwd)":/app vision-dev:latest bash
+```
+
+Helper script:
+
+```bash
+./run-docker-mac
+```
+
 Windows:
 
 ```bat
-docker run -it --gpus all -v %cd%:/app vision-dev:latest bash
+docker run -it -v %cd%:/app vision-dev:latest bash
 ```
 
-Explanation:
+Helper script:
 
-- `-it` opens an interactive terminal.
-- `--gpus all` enables GPU access inside the container.
-- `-v ${PWD}:/app` or `-v %cd%:/app` mounts the current project directory into the container.
-
-Inside the container, the project appears at:
-
-```text
-/app
+```powershell
+.\run-docker-win.bat
 ```
 
-This means edits made on the host machine are immediately visible inside the container.
+### Run the Jetson container
 
-### Verify GPU availability
-
-Inside the container, run:
+On the Jetson:
 
 ```bash
-python -c "import torch; print(torch.cuda.is_available())"
+docker run -it --gpus all -v ${PWD}:/app vision-jetson:latest bash
 ```
 
-Expected output:
-
-```text
-True
-```
-
-If using NVIDIA graphics, you can also check:
+Helper script:
 
 ```bash
-nvidia-smi
+./run-docker-jetson
 ```
 
-Check the CUDA version seen by PyTorch with:
+### Hugging Face CLI
+
+Inside either container, the Hugging Face CLI should be available:
 
 ```bash
-python -c "import torch; print(torch.version.cuda)"
+huggingface-cli --help
 ```
 
-### Typical development workflow
+You can log in for model downloads with:
 
-1. Build the image from the project root.
-2. Start the container using one of the `docker/` run scripts.
-3. Work inside `/app`.
-4. Run scripts or experiments normally.
+```bash
+huggingface-cli login
+```
+
+### Typical workflow
+
+1. Build `vision-dev:latest` on the dev machine.
+2. Edit and iterate locally.
+3. Build `vision-jetson:latest` on the Jetson.
+4. Validate YOLO, VLM, GPU, and deployment behavior on the Jetson.
 
 ### Notes
 
 - The repository is mounted from the host, so code changes do not require rebuilding the image.
-- Rebuild the image only if `docker/Dockerfile` or `docker/requirements.txt` changes.
-- Run the helper scripts from the project root so the current directory is mounted correctly.
+- Rebuild when `docker/requirements.txt` or the relevant Dockerfile changes.
+- `docker/Dockerfile.jetson` is for ARM64 Jetson systems and will not build normally on an x86 Docker Desktop environment.
+- `run-docker-jetson` and `run-docker-linux` request GPU passthrough with `--gpus all`.
+- `run-docker-mac` and `run-docker-win.bat` intentionally run without GPU flags.
+- On Linux and Jetson, run `chmod +x build-docker-dev-machine build-docker-jetson run-docker-linux run-docker-mac run-docker-jetson` once after cloning if execute bits are missing.
