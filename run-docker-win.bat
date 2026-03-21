@@ -1,2 +1,2 @@
 @echo off
-docker run -it -v %cd%:/app vision-dev:latest bash
+docker run -it --gpus all -v %cd%:/app vision-dev:latest bash
