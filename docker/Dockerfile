@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt /tmp/requirements.txt
+COPY requirements.dev.txt /tmp/requirements.txt
 
 RUN python3 -m pip install --upgrade pip setuptools wheel && \
     python3 -m pip install -r /tmp/requirements.txt
