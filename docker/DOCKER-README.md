@@ -9,6 +9,8 @@ All Docker-related files live under the `docker/` folder:
 - `docker/Dockerfile.dev`
 - `docker/Dockerfile.jetson`
 - `docker/requirements.txt`
+- `docker/requirements.dev.txt`
+- `docker/requirements.jetson.txt`
 
 ## Docker environment setup
 
@@ -24,6 +26,9 @@ Current convention:
 - `docker/Dockerfile` is the default dev-machine Dockerfile
 - `docker/Dockerfile.dev` is the explicit dev-machine Dockerfile
 - `docker/Dockerfile.jetson` is the Jetson-only Dockerfile
+- `docker/requirements.dev.txt` is the dev-machine Python dependency set
+- `docker/requirements.jetson.txt` is the Jetson Python dependency set
+- `docker/requirements.txt` mirrors the dev dependency set for compatibility and quick inspection
 
 ### Build on the dev machine
 
@@ -143,9 +148,11 @@ huggingface-cli login
 ### Notes
 
 - The repository is mounted from the host, so code changes do not require rebuilding the image.
-- Rebuild when `docker/requirements.txt` or the relevant Dockerfile changes.
+- Rebuild when the relevant Dockerfile or requirements file changes.
 - `docker/Dockerfile.jetson` is for ARM64 Jetson systems and will not build normally on an x86 Docker Desktop environment.
 - `run-docker-jetson` requests GPU access with `--runtime=nvidia`, which is the Jetson-compatible runtime setting.
 - `run-docker-linux` and `run-docker-win.bat` request GPU passthrough with `--gpus all`.
 - `run-docker-mac` intentionally runs without GPU flags.
 - On Linux and Jetson, run `chmod +x build-docker-dev-machine build-docker-jetson run-docker-linux run-docker-mac run-docker-jetson` once after cloning if execute bits are missing.
+- The dev image installs `opencv-python` from pip.
+- The Jetson image installs `python3-opencv` from apt and avoids the pip OpenCV wheel to reduce Jetson-specific `cv2` conflicts.
