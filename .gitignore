@@ -7,3 +7,4 @@ chat-history/
 *.onnx
 *.engine
 *.bin
+*.gz
