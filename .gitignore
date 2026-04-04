@@ -1,4 +1,5 @@
 chat-history/
+test/
 
 # Model weights and checkpoints
 *.pt
