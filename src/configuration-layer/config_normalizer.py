@@ -1,0 +1,66 @@
+from __future__ import annotations
+
+from typing import Any, Iterable
+
+from config_defaults import DEFAULT_CONFIG_VALUES
+from config_types import ConfigurationLayerConfig
+
+
+def _normalize_bool(value: Any, config_key: str) -> bool:
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "on"}:
+            return True
+        if lowered in {"false", "0", "no", "off"}:
+            return False
+
+    raise TypeError(f"{config_key} must be a bool-compatible value.")
+
+
+def _normalize_resolution(value: Any) -> tuple[int, int]:
+    if isinstance(value, str):
+        cleaned = value.lower().replace(" ", "")
+        if "x" in cleaned:
+            width_text, height_text = cleaned.split("x", maxsplit=1)
+            return (int(width_text), int(height_text))
+
+    if isinstance(value, Iterable) and not isinstance(value, (str, bytes, dict)):
+        parts = list(value)
+        if len(parts) == 2:
+            return (int(parts[0]), int(parts[1]))
+
+    raise TypeError("config_frame_resolution must be a two-item resolution value.")
+
+
+def normalize_config(raw_config: dict[str, Any]) -> ConfigurationLayerConfig:
+    merged = {**DEFAULT_CONFIG_VALUES, **raw_config}
+
+    return ConfigurationLayerConfig(
+        config_device=str(merged["config_device"]).strip().lower(),
+        config_input_source=str(merged["config_input_source"]).strip().lower(),
+        config_input_path=(
+            None if merged["config_input_path"] in {None, ""} else str(merged["config_input_path"])
+        ),
+        config_frame_resolution=_normalize_resolution(merged["config_frame_resolution"]),
+        config_roi_enabled=_normalize_bool(merged["config_roi_enabled"], "config_roi_enabled"),
+        config_roi_vehicle_count_threshold=int(merged["config_roi_vehicle_count_threshold"]),
+        config_yolo_model=str(merged["config_yolo_model"]).strip(),
+        config_yolo_confidence_threshold=float(merged["config_yolo_confidence_threshold"]),
+        config_vlm_enabled=_normalize_bool(merged["config_vlm_enabled"], "config_vlm_enabled"),
+        config_vlm_model=str(merged["config_vlm_model"]).strip(),
+        config_scene_awareness_enabled=_normalize_bool(
+            merged["config_scene_awareness_enabled"],
+            "config_scene_awareness_enabled",
+        ),
+        config_metadata_output_enabled=_normalize_bool(
+            merged["config_metadata_output_enabled"],
+            "config_metadata_output_enabled",
+        ),
+        config_evaluation_output_enabled=_normalize_bool(
+            merged["config_evaluation_output_enabled"],
+            "config_evaluation_output_enabled",
+        ),
+    )
