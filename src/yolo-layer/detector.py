@@ -14,6 +14,8 @@
 # Expected upstream input: roi_layer_package (or input_layer_package if ROI disabled)
 # Downstream consumer: tracking_layer
 
+from pathlib import Path
+
 from ultralytics import YOLO
 from class_map import TARGET_CLASSES
 
@@ -32,6 +34,9 @@ _state = {
     "initialized": False,
 }
 
+_LAYER_DIR = Path(__file__).resolve().parent
+_MODEL_DIR = _LAYER_DIR / "models"
+
 
 # ---------------------------------------------------------------------------
 # Public functions (spec-defined)
@@ -46,21 +51,23 @@ def initialize_yolo_layer(model_name="yolov8n.pt", conf_threshold=0.25, device="
 
     Args:
         model_name: Pretrained model name (e.g., "yolov8n.pt") or path
-                    to a custom .pt file. Ultralytics downloads the model
-                    automatically the first time.
+                    to a custom .pt file. The layer prefers bundled local
+                    weights under src/yolo-layer/models before falling back
+                    to Ultralytics lookup.
         conf_threshold: Minimum confidence to keep a detection (0.0 to 1.0).
                         Lower = more detections but more false positives.
                         0.25 is a reasonable starting default.
         device: Compute target. "cpu" for laptops, "cuda" for GPU,
                 "cuda:0" for a specific GPU.
     """
-    _state["model"] = YOLO(model_name)
+    resolved_model_name = _resolve_model_path(model_name)
+    _state["model"] = YOLO(resolved_model_name)
     _state["conf_threshold"] = conf_threshold
     _state["target_class_ids"] = set(TARGET_CLASSES.keys())
     _state["device"] = device
     _state["initialized"] = True
 
-    print(f"[yolo_layer] Loaded model: {model_name}")
+    print(f"[yolo_layer] Loaded model: {resolved_model_name}")
     print(f"[yolo_layer] Device: {device}")
     print(f"[yolo_layer] Confidence threshold: {conf_threshold}")
     print(f"[yolo_layer] Target classes: {TARGET_CLASSES}")
@@ -87,7 +94,6 @@ def run_yolo_detection(upstream_package):
     if not _state["initialized"]:
         raise RuntimeError("yolo_layer not initialized. Call initialize_yolo_layer() first.")
 
-    # Accept either ROI or input package format
     image = upstream_package.get("roi_layer_image",
             upstream_package.get("input_layer_image"))
 
@@ -95,7 +101,6 @@ def run_yolo_detection(upstream_package):
         raise ValueError("Upstream package has no image field "
                          "(expected roi_layer_image or input_layer_image).")
 
-    # Run YOLO inference. verbose=False suppresses per-frame console spam.
     results = _state["model"](
         image,
         conf=_state["conf_threshold"],
@@ -103,7 +108,6 @@ def run_yolo_detection(upstream_package):
         verbose=False,
     )
 
-    # results is a list (one per image). We sent one image, so take [0].
     result = results[0]
 
     raw_detections = []
@@ -145,10 +149,8 @@ def filter_yolo_detections(raw_detections):
 
     filtered = []
     for det in raw_detections:
-        # Check class
         if det["yolo_detection_class_id"] not in target_ids:
             continue
-        # Check confidence (redundant with model-level filter, but safe)
         if det["yolo_detection_confidence"] < conf_threshold:
             continue
         filtered.append(det)
@@ -173,8 +175,6 @@ def build_yolo_layer_package(frame_id, filtered_detections):
                 - "yolo_detection_class": str
                 - "yolo_detection_confidence": float
     """
-    # Build clean output — strip the class_id debug field for the
-    # official package, since the spec only defines bbox/class/confidence.
     clean_detections = []
     for det in filtered_detections:
         clean_detections.append({
@@ -207,7 +207,6 @@ def process_frame(upstream_package):
     Returns:
         yolo_layer_package: the standard detection package.
     """
-    # Get frame_id from whichever upstream format we received
     frame_id = upstream_package.get("roi_layer_frame_id",
                upstream_package.get("input_layer_frame_id"))
 
@@ -216,3 +215,21 @@ def process_frame(upstream_package):
     yolo_layer_package = build_yolo_layer_package(frame_id, filtered_detections)
 
     return yolo_layer_package
+
+
+def _resolve_model_path(model_name):
+    """Prefer bundled local YOLO weights before falling back to Ultralytics lookup."""
+    candidate = Path(model_name)
+    if candidate.exists():
+        return str(candidate)
+
+    bundled_candidate = _MODEL_DIR / model_name
+    if bundled_candidate.exists():
+        return str(bundled_candidate)
+
+    if candidate.suffix == "":
+        bundled_pt_candidate = _MODEL_DIR / f"{model_name}.pt"
+        if bundled_pt_candidate.exists():
+            return str(bundled_pt_candidate)
+
+    return model_name
