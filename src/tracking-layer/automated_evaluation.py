@@ -31,25 +31,18 @@ from pathlib import Path
 _THIS_DIR = Path(__file__).resolve().parent
 _YOLO_DIR = _THIS_DIR.parent / "yolo-layer"
 _CONFIG_DIR = _THIS_DIR.parent / "configuration-layer"
+_INPUT_DIR = _THIS_DIR.parent / "input-layer"
 _REPO_ROOT = _THIS_DIR.parent.parent
 sys.path.insert(0, str(_THIS_DIR))
 sys.path.insert(0, str(_YOLO_DIR))
 sys.path.insert(0, str(_CONFIG_DIR))
+sys.path.insert(0, str(_INPUT_DIR))
 
 import cv2
 from config_node import get_config_value, load_config, validate_config
-from detector import (
-    build_yolo_layer_package,
-    filter_yolo_detections,
-    initialize_yolo_layer,
-    run_yolo_detection,
-)
-from tracker import (
-    assign_tracking_status,
-    build_tracking_layer_package,
-    initialize_tracking_layer,
-    update_tracks,
-)
+from detector import build_yolo_layer_package, filter_yolo_detections, initialize_yolo_layer, run_yolo_detection
+from input_layer import InputLayer
+from tracker import assign_tracking_status, build_tracking_layer_package, initialize_tracking_layer, update_tracks
 
 BOX_COLOR = (0, 255, 0)
 TEXT_COLOR = (0, 0, 0)
@@ -78,6 +71,7 @@ def infer_model_family(model_name):
     return "unknown"
 
 
+
 def tracking_package_rows(tracking_pkg):
     return [
         {
@@ -97,6 +91,7 @@ def tracking_package_rows(tracking_pkg):
     ]
 
 
+
 def draw_yolo_detections(frame, yolo_pkg):
     for det in yolo_pkg["yolo_layer_detections"]:
         x1, y1, x2, y2 = [int(v) for v in det["yolo_detection_bbox"]]
@@ -111,6 +106,7 @@ def draw_yolo_detections(frame, yolo_pkg):
         cv2.rectangle(frame, (label_x, label_y - text_h - 4), (label_x + text_w + 4, label_y + 4), BOX_COLOR, -1)
         cv2.putText(frame, label, (label_x + 2, label_y), font, font_scale, TEXT_COLOR, font_thickness, cv2.LINE_AA)
     return frame
+
 
 
 def draw_tracking_detections(frame, tracking_pkg):
@@ -131,6 +127,7 @@ def draw_tracking_detections(frame, tracking_pkg):
     return frame
 
 
+
 def draw_run_hud(frame, run_label, frame_id, device_mode, fps_actual, average_fps, infer_fps, average_infer_fps, detections_count, tracks_count):
     lines = [
         f"Run: {run_label}",
@@ -149,14 +146,11 @@ def draw_run_hud(frame, run_label, frame_id, device_mode, fps_actual, average_fp
     return frame
 
 
+
 def _ensure_table_column(connection, table_name, column_name, column_definition):
-    existing_columns = {
-        row[1] for row in connection.execute(f"PRAGMA table_info({table_name})")
-    }
+    existing_columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table_name})")}
     if column_name not in existing_columns:
-        connection.execute(
-            f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}"
-        )
+        connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}")
 
 
 
@@ -216,6 +210,7 @@ def initialize_metrics_db(db_path):
     return connection
 
 
+
 def insert_run_record(connection, combo, fps, width, height, max_frames_requested, max_seconds_requested):
     run_id = str(uuid.uuid4())
     connection.execute(
@@ -248,6 +243,7 @@ def insert_run_record(connection, combo, fps, width, height, max_frames_requeste
     return run_id
 
 
+
 def insert_frame_record(connection, run_id, frame_id, elapsed_seconds, fps_actual, average_fps, infer_ms, infer_fps, average_infer_fps, detections_count, tracks_count, new_count, active_count, lost_count):
     connection.execute(
         """
@@ -273,6 +269,7 @@ def insert_frame_record(connection, run_id, frame_id, elapsed_seconds, fps_actua
             int(lost_count),
         ),
     )
+
 
 
 def finalize_run_record(connection, run_id, status, processed_frames, elapsed_seconds, average_fps, average_infer_fps, average_detections, average_tracks):
@@ -302,11 +299,39 @@ def finalize_run_record(connection, run_id, status, processed_frames, elapsed_se
     connection.commit()
 
 
+
 def _resolve_repo_path(path_value: str) -> str:
     path = Path(path_value)
     if path.is_absolute():
         return str(path)
     return str((_REPO_ROOT / path).resolve())
+
+
+
+def probe_source_metadata(input_source, input_path, frame_resolution):
+    width, height = frame_resolution
+    fps = 30.0
+    total_frames = 0
+    if input_source == "video":
+        cap = cv2.VideoCapture(input_path)
+        if not cap.isOpened():
+            raise RuntimeError(f"Could not probe video source: {input_path}")
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap.release()
+    return fps, width, height, total_frames
+
+
+
+def input_package_to_dict(package):
+    return {
+        "input_layer_frame_id": package.input_layer_frame_id,
+        "input_layer_timestamp": package.input_layer_timestamp,
+        "input_layer_image": package.input_layer_image,
+        "input_layer_source_type": package.input_layer_source_type,
+        "input_layer_resolution": package.input_layer_resolution,
+    }
+
 
 
 def load_runtime_settings():
@@ -315,7 +340,9 @@ def load_runtime_settings():
     validate_config(config)
     default_output_dir = Path(r"E:\OneDrive\desktop\video")
     return {
+        "input_source": get_config_value(config, "config_input_source"),
         "video": _resolve_repo_path(get_config_value(config, "config_input_path")),
+        "frame_resolution": tuple(get_config_value(config, "config_frame_resolution")),
         "confidence": get_config_value(config, "config_yolo_confidence_threshold"),
         "device": get_config_value(config, "config_device"),
         "output_dir": str(default_output_dir),
@@ -323,7 +350,8 @@ def load_runtime_settings():
     }
 
 
-def build_run_combinations(video_path, output_dir, confidence):
+
+def build_run_combinations(input_source, input_path, frame_resolution, output_dir, confidence, camera_index, use_gstreamer):
     combinations = []
     for device_mode in ["cpu", "cuda"]:
         for model_family, model_name in MODEL_MAP.items():
@@ -332,7 +360,11 @@ def build_run_combinations(video_path, output_dir, confidence):
                 output_name = f"eval_{model_family}_{device_mode}_{tracking_label}.mp4"
                 combinations.append(
                     {
-                        "video_path": video_path,
+                        "input_source": input_source,
+                        "video_path": input_path,
+                        "frame_resolution": tuple(frame_resolution),
+                        "camera_index": camera_index,
+                        "use_gstreamer": use_gstreamer,
                         "output_video_path": str((Path(output_dir) / output_name).resolve()),
                         "model_name": model_name,
                         "model_family": model_family,
@@ -345,38 +377,39 @@ def build_run_combinations(video_path, output_dir, confidence):
     return combinations
 
 
-def run_single_evaluation(combo, connection, max_frames_requested, max_seconds_requested):
-    cap = cv2.VideoCapture(combo["video_path"])
-    if not cap.isOpened():
-        raise RuntimeError(f"Could not open video: {combo['video_path']}")
 
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+def run_single_evaluation(combo, connection, max_frames_requested, max_seconds_requested):
+    fps, width, height, total_frames = probe_source_metadata(combo["input_source"], combo["video_path"], combo["frame_resolution"])
 
     os.makedirs(os.path.dirname(combo["output_video_path"]) or ".", exist_ok=True)
     out = cv2.VideoWriter(combo["output_video_path"], cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
     if not out.isOpened():
-        cap.release()
         raise RuntimeError(f"Could not create output video: {combo['output_video_path']}")
 
     run_id = insert_run_record(connection, combo, fps, width, height, max_frames_requested, max_seconds_requested)
     print()
     print(f"[eval] Starting {combo['run_label']}")
-    print(f"[eval] Video:  {combo['video_path']}")
+    print(f"[eval] Source: {combo['input_source']}")
+    if combo["input_source"] == "video":
+        print(f"[eval] Video:  {combo['video_path']}")
     print(f"[eval] Output: {combo['output_video_path']}")
-    print(f"[eval] Frames: {total_frames}")
+    print(f"[eval] Frames: {total_frames if total_frames > 0 else 'unknown'}")
+    print(f"[eval] Resolution: {width}x{height}")
 
-    initialize_yolo_layer(
-        model_name=combo["model_name"],
-        conf_threshold=combo["confidence"],
-        device=combo["device_mode"],
+    input_layer = InputLayer()
+    input_layer.initialize_input_layer(
+        config_input_source=combo["input_source"],
+        config_frame_resolution=combo["frame_resolution"],
+        config_input_path=combo["video_path"],
+        camera_device_index=combo["camera_index"],
+        use_gstreamer=combo["use_gstreamer"],
     )
+
+    initialize_yolo_layer(model_name=combo["model_name"], conf_threshold=combo["confidence"], device=combo["device_mode"])
     if combo["tracking_enabled"]:
         initialize_tracking_layer(frame_rate=int(fps))
 
-    frame_id = 0
+    processed_frames = 0
     start_time = time.time()
     total_infer_seconds = 0.0
     total_detections = 0
@@ -384,17 +417,13 @@ def run_single_evaluation(combo, connection, max_frames_requested, max_seconds_r
 
     try:
         while True:
-            ret, frame = cap.read()
-            if not ret:
+            raw_frame = input_layer.read_next_frame()
+            if raw_frame is None:
                 break
 
-            input_pkg = {
-                "input_layer_frame_id": frame_id,
-                "input_layer_timestamp": round(frame_id / fps, 4),
-                "input_layer_image": frame,
-                "input_layer_source_type": "video",
-                "input_layer_resolution": (width, height),
-            }
+            input_package = input_layer.build_input_layer_package(raw_frame)
+            input_pkg = input_package_to_dict(input_package)
+            frame_id = input_package.input_layer_frame_id
 
             infer_start = time.perf_counter()
             raw_dets = run_yolo_detection(input_pkg)
@@ -410,7 +439,7 @@ def run_single_evaluation(combo, connection, max_frames_requested, max_seconds_r
             new_count = 0
             active_count = 0
             lost_count = 0
-            annotated = frame.copy()
+            annotated = input_package.input_layer_image.copy()
 
             if combo["tracking_enabled"]:
                 current_tracks = update_tracks(yolo_pkg)
@@ -427,95 +456,46 @@ def run_single_evaluation(combo, connection, max_frames_requested, max_seconds_r
                 annotated = draw_yolo_detections(annotated, yolo_pkg)
 
             elapsed = time.time() - start_time
-            fps_actual = (frame_id + 1) / elapsed if elapsed > 0 else 0.0
+            fps_actual = processed_frames / elapsed if elapsed > 0 else 0.0
             average_fps = fps_actual
             infer_fps = 1000.0 / infer_ms if infer_ms > 0 else 0.0
-            average_infer_fps = (frame_id + 1) / total_infer_seconds if total_infer_seconds > 0 else 0.0
+            average_infer_fps = processed_frames / total_infer_seconds if total_infer_seconds > 0 else 0.0
 
-            annotated = draw_run_hud(
-                annotated,
-                combo["run_label"],
-                frame_id,
-                combo["device_mode"],
-                fps_actual,
-                average_fps,
-                infer_fps,
-                average_infer_fps,
-                detections_count,
-                tracks_count,
-            )
+            annotated = draw_run_hud(annotated, combo["run_label"], frame_id, combo["device_mode"], fps_actual, average_fps, infer_fps, average_infer_fps, detections_count, tracks_count)
             out.write(annotated)
 
-            insert_frame_record(
-                connection,
-                run_id,
-                frame_id,
-                elapsed,
-                fps_actual,
-                average_fps,
-                infer_ms,
-                infer_fps,
-                average_infer_fps,
-                detections_count,
-                tracks_count,
-                new_count,
-                active_count,
-                lost_count,
-            )
+            insert_frame_record(connection, run_id, frame_id, elapsed, fps_actual, average_fps, infer_ms, infer_fps, average_infer_fps, detections_count, tracks_count, new_count, active_count, lost_count)
 
             if frame_id % 50 == 0:
-                print(
-                    f"[eval] {combo['run_label']} frame {frame_id}/{total_frames} "
-                    f"- FPS {fps_actual:.1f} - inferFPS {average_infer_fps:.1f} "
-                    f"- det {detections_count} - tracks {tracks_count}"
-                )
+                total_frames_text = total_frames if total_frames > 0 else "unknown"
+                print(f"[eval] {combo['run_label']} frame {frame_id}/{total_frames_text} - FPS {fps_actual:.1f} - inferFPS {average_infer_fps:.1f} - det {detections_count} - tracks {tracks_count}")
 
-            frame_id += 1
+            processed_frames = frame_id
             if max_frames_requested > 0 and frame_id >= max_frames_requested:
                 break
             if max_seconds_requested > 0 and elapsed >= max_seconds_requested:
                 break
 
         elapsed_total = time.time() - start_time
-        average_fps = (frame_id / elapsed_total) if elapsed_total > 0 else 0.0
-        average_infer_fps = (frame_id / total_infer_seconds) if total_infer_seconds > 0 else 0.0
-        average_detections = (total_detections / frame_id) if frame_id > 0 else 0.0
-        average_tracks = (total_tracks / frame_id) if frame_id > 0 else 0.0
-        finalize_run_record(
-            connection,
-            run_id,
-            "completed",
-            frame_id,
-            elapsed_total,
-            average_fps,
-            average_infer_fps,
-            average_detections,
-            average_tracks,
-        )
+        average_fps = (processed_frames / elapsed_total) if elapsed_total > 0 and processed_frames > 0 else 0.0
+        average_infer_fps = (processed_frames / total_infer_seconds) if total_infer_seconds > 0 and processed_frames > 0 else 0.0
+        average_detections = (total_detections / processed_frames) if processed_frames > 0 else 0.0
+        average_tracks = (total_tracks / processed_frames) if processed_frames > 0 else 0.0
+        finalize_run_record(connection, run_id, "completed", processed_frames, elapsed_total, average_fps, average_infer_fps, average_detections, average_tracks)
         print(f"[eval] Completed {combo['run_label']} -> {combo['output_video_path']}")
     except Exception:
         elapsed_total = time.time() - start_time
-        processed_frames = frame_id
-        average_fps = (processed_frames / elapsed_total) if elapsed_total > 0 else 0.0
-        average_infer_fps = (processed_frames / total_infer_seconds) if total_infer_seconds > 0 else 0.0
+        average_fps = (processed_frames / elapsed_total) if elapsed_total > 0 and processed_frames > 0 else 0.0
+        average_infer_fps = (processed_frames / total_infer_seconds) if total_infer_seconds > 0 and processed_frames > 0 else 0.0
         average_detections = (total_detections / processed_frames) if processed_frames > 0 else 0.0
         average_tracks = (total_tracks / processed_frames) if processed_frames > 0 else 0.0
-        finalize_run_record(
-            connection,
-            run_id,
-            "failed",
-            processed_frames,
-            elapsed_total,
-            average_fps,
-            average_infer_fps,
-            average_detections,
-            average_tracks,
-        )
+        finalize_run_record(connection, run_id, "failed", processed_frames, elapsed_total, average_fps, average_infer_fps, average_detections, average_tracks)
         raise
     finally:
         connection.commit()
-        cap.release()
+        input_layer.close_input_layer()
         out.release()
+
 
 
 def _fallback_metrics_db_path(metrics_db_path):
@@ -528,7 +508,10 @@ def _fallback_metrics_db_path(metrics_db_path):
 def main():
     runtime_defaults = load_runtime_settings()
     parser = argparse.ArgumentParser(description="Run automated evaluation across model/device/tracking combinations")
-    parser.add_argument("--video", default=runtime_defaults["video"], help="Input video path")
+    parser.add_argument("--input-source", default=runtime_defaults["input_source"], choices=["video", "camera"], help="Input source selected through the input layer")
+    parser.add_argument("--video", default=runtime_defaults["video"], help="Input video path used when --input-source is video")
+    parser.add_argument("--camera-index", type=int, default=0, help="Camera device index used when --input-source is camera")
+    parser.add_argument("--gstreamer", action="store_true", help="Use GStreamer camera pipeline when --input-source is camera")
     parser.add_argument("--conf", type=float, default=runtime_defaults["confidence"], help="Confidence threshold")
     parser.add_argument("--output-dir", default=runtime_defaults["output_dir"], help="Directory for annotated output videos")
     parser.add_argument("--metrics-db", default=runtime_defaults["metrics_db"], help="SQLite database path for evaluation metrics")
@@ -541,7 +524,7 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(metrics_db.parent if str(metrics_db.parent) else ".", exist_ok=True)
 
-    combinations = build_run_combinations(args.video, output_dir, args.conf)
+    combinations = build_run_combinations(args.input_source, args.video, runtime_defaults["frame_resolution"], output_dir, args.conf, args.camera_index, args.gstreamer)
     print(f"[eval] Scheduled {len(combinations)} runs")
     print(f"[eval] Output dir: {output_dir}")
     print(f"[eval] Metrics DB: {metrics_db}")
@@ -558,6 +541,7 @@ def main():
         print(f"[eval] Metrics DB locked, using fallback DB: {fallback_metrics_db}")
         resolved_metrics_db = fallback_metrics_db
         connection = initialize_metrics_db(resolved_metrics_db)
+
     try:
         for index, combo in enumerate(combinations, start=1):
             print(f"[eval] Run {index}/{len(combinations)}")
