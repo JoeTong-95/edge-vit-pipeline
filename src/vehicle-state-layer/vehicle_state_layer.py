@@ -20,6 +20,7 @@ new, active, or lost; that decision belongs to the tracking layer.
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import asdict, is_dataclass
 from typing import Any
 
 
@@ -34,15 +35,6 @@ _state = {
 
 
 def initialize_vehicle_state_layer(prune_after_lost_frames: int | None = None) -> None:
-    """
-    Prepare empty persistent vehicle state.
-
-    Args:
-        prune_after_lost_frames:
-            Optional threshold for dropping stale records once their
-            ``vehicle_state_layer_lost_frame_count`` exceeds this value.
-            ``None`` keeps lost records indefinitely.
-    """
     if prune_after_lost_frames is not None and prune_after_lost_frames < 0:
         raise ValueError("prune_after_lost_frames must be non-negative or None.")
 
@@ -51,24 +43,10 @@ def initialize_vehicle_state_layer(prune_after_lost_frames: int | None = None) -
     _state["prune_after_lost_frames"] = prune_after_lost_frames
 
 
+
 def update_vehicle_state_from_tracking(
     tracking_layer_package: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
-    """
-    Update object state using tracking data.
-
-    Expected tracking package fields:
-        - tracking_layer_frame_id
-        - tracking_layer_track_id
-        - tracking_layer_bbox
-        - tracking_layer_detector_class
-        - tracking_layer_confidence
-        - tracking_layer_status
-
-    Returns:
-        A deep-copied mapping of ``track_id -> vehicle_state_record`` after the
-        tracking update and optional pruning pass.
-    """
     _assert_initialized()
     _validate_tracking_layer_package(tracking_layer_package)
 
@@ -99,24 +77,14 @@ def update_vehicle_state_from_tracking(
     return deepcopy(_state["records"])
 
 
+
 def update_vehicle_state_from_vlm(
-    vlm_layer_package: dict[str, Any],
+    vlm_layer_package: Any,
 ) -> dict[str, Any]:
-    """
-    Update stored semantic fields using VLM results.
-
-    Expected VLM package fields:
-        - vlm_layer_track_id
-        - vlm_layer_label
-        - vlm_layer_attributes
-
-    Returns:
-        The updated record for the target track as a deep copy.
-    """
     _assert_initialized()
     _validate_vlm_layer_package(vlm_layer_package)
 
-    track_id = str(vlm_layer_package["vlm_layer_track_id"])
+    track_id = str(_package_get(vlm_layer_package, "vlm_layer_track_id"))
     record = _state["records"].get(track_id)
     if record is None:
         raise KeyError(
@@ -126,30 +94,23 @@ def update_vehicle_state_from_vlm(
 
     merge_vlm_into_vehicle_state(
         vehicle_state_record=record,
-        vlm_layer_label=vlm_layer_package["vlm_layer_label"],
-        vlm_layer_attributes=vlm_layer_package["vlm_layer_attributes"],
+        vlm_layer_label=_package_get(vlm_layer_package, "vlm_layer_label"),
+        vlm_layer_attributes=_package_get(vlm_layer_package, "vlm_layer_attributes"),
     )
     return deepcopy(record)
 
 
+
 def get_vehicle_state_record(vehicle_state_layer_track_id: str | int) -> dict[str, Any] | None:
-    """Return the current state record for one track, or ``None`` if missing."""
     _assert_initialized()
     record = _state["records"].get(str(vehicle_state_layer_track_id))
     return deepcopy(record) if record is not None else None
 
 
+
 def build_vehicle_state_layer_package(
     track_ids: list[str | int] | None = None,
 ) -> dict[str, list[Any]]:
-    """
-    Create the vehicle_state_layer_package for downstream output.
-
-    Args:
-        track_ids:
-            Optional list of track IDs to include. When omitted, all records are
-            emitted in ascending numeric-then-lexicographic track ID order.
-    """
     _assert_initialized()
 
     selected_records = _select_records_for_package(track_ids=track_ids)
@@ -183,12 +144,12 @@ def build_vehicle_state_layer_package(
     }
 
 
+
 def create_vehicle_state_record(
     vehicle_state_layer_track_id: str,
     vehicle_state_layer_first_seen_frame: int,
     vehicle_state_layer_vehicle_class: str,
 ) -> dict[str, Any]:
-    """Create the initial state record for a newly tracked object."""
     return {
         "vehicle_state_layer_track_id": vehicle_state_layer_track_id,
         "vehicle_state_layer_first_seen_frame": vehicle_state_layer_first_seen_frame,
@@ -201,13 +162,13 @@ def create_vehicle_state_record(
     }
 
 
+
 def merge_tracking_into_vehicle_state(
     vehicle_state_record: dict[str, Any],
     tracking_frame_id: int,
     tracking_detector_class: str,
     tracking_status: str,
 ) -> None:
-    """Apply tracking updates to the stored state record."""
     if tracking_status not in {"new", "active", "lost"}:
         raise ValueError(
             "tracking_status must be one of: 'new', 'active', 'lost'."
@@ -223,12 +184,12 @@ def merge_tracking_into_vehicle_state(
     vehicle_state_record["vehicle_state_layer_lost_frame_count"] += 1
 
 
+
 def merge_vlm_into_vehicle_state(
     vehicle_state_record: dict[str, Any],
     vlm_layer_label: str,
     vlm_layer_attributes: dict[str, Any],
 ) -> None:
-    """Apply semantic enrichment to the stored state record."""
     semantic_tags = vehicle_state_record["vehicle_state_layer_semantic_tags"]
     semantic_tags.update(deepcopy(vlm_layer_attributes))
 
@@ -240,8 +201,8 @@ def merge_vlm_into_vehicle_state(
     vehicle_state_record["vehicle_state_layer_vlm_called"] = True
 
 
+
 def prune_vehicle_state_records() -> None:
-    """Remove stale records when a prune threshold is configured."""
     threshold = _state["prune_after_lost_frames"]
     if threshold is None:
         return
@@ -255,12 +216,14 @@ def prune_vehicle_state_records() -> None:
         del _state["records"][track_id]
 
 
+
 def _assert_initialized() -> None:
     if not _state["initialized"]:
         raise RuntimeError(
             "vehicle_state_layer has not been initialized. "
             "Call initialize_vehicle_state_layer() first."
         )
+
 
 
 def _validate_tracking_layer_package(tracking_layer_package: dict[str, Any]) -> None:
@@ -289,7 +252,8 @@ def _validate_tracking_layer_package(tracking_layer_package: dict[str, Any]) -> 
         )
 
 
-def _validate_vlm_layer_package(vlm_layer_package: dict[str, Any]) -> None:
+
+def _validate_vlm_layer_package(vlm_layer_package: Any) -> None:
     required_fields = [
         "vlm_layer_track_id",
         "vlm_layer_label",
@@ -301,22 +265,38 @@ def _validate_vlm_layer_package(vlm_layer_package: dict[str, Any]) -> None:
         package_name="vlm_layer_package",
     )
 
-    if not isinstance(vlm_layer_package["vlm_layer_attributes"], dict):
+    if not isinstance(_package_get(vlm_layer_package, "vlm_layer_attributes"), dict):
         raise ValueError("vlm_layer_attributes must be a dict.")
 
 
+
 def _validate_required_fields(
-    package: dict[str, Any],
+    package: Any,
     required_fields: list[str],
     package_name: str,
 ) -> None:
     missing_fields = [
-        field_name for field_name in required_fields if field_name not in package
+        field_name for field_name in required_fields if not _package_has(package, field_name)
     ]
     if missing_fields:
         raise ValueError(
             f"{package_name} is missing required fields: {', '.join(missing_fields)}"
         )
+
+
+
+def _package_has(package: Any, field_name: str) -> bool:
+    return (isinstance(package, dict) and field_name in package) or hasattr(package, field_name)
+
+
+
+def _package_get(package: Any, field_name: str) -> Any:
+    if isinstance(package, dict):
+        return package[field_name]
+    if is_dataclass(package):
+        return asdict(package)[field_name]
+    return getattr(package, field_name)
+
 
 
 def _select_records_for_package(track_ids: list[str | int] | None) -> list[dict[str, Any]]:
@@ -331,6 +311,7 @@ def _select_records_for_package(track_ids: list[str | int] | None) -> list[dict[
         if record is not None:
             selected_records.append(record)
     return selected_records
+
 
 
 def _track_id_sort_key(track_id: str) -> tuple[int, int | str]:
@@ -351,4 +332,3 @@ __all__ = [
     "update_vehicle_state_from_tracking",
     "update_vehicle_state_from_vlm",
 ]
-

@@ -24,7 +24,7 @@ import numpy as np
 
 
 def build_vlm_frame_cropper_request_package(
-    input_layer_package: dict[str, Any],
+    input_layer_package: Any,
     tracking_layer_package: dict[str, Any],
     track_index: int,
     vlm_frame_cropper_trigger_reason: str,
@@ -46,7 +46,7 @@ def build_vlm_frame_cropper_request_package(
         raise IndexError("track_index is out of range for tracking_layer_package.")
 
     return {
-        "vlm_frame_cropper_frame_id": input_layer_package["input_layer_frame_id"],
+        "vlm_frame_cropper_frame_id": _package_get(input_layer_package, "input_layer_frame_id"),
         "vlm_frame_cropper_track_id": str(
             tracking_layer_package["tracking_layer_track_id"][track_index]
         ),
@@ -59,7 +59,7 @@ def build_vlm_frame_cropper_request_package(
 
 
 def extract_vlm_object_crop(
-    input_layer_package: dict[str, Any],
+    input_layer_package: Any,
     vlm_frame_cropper_request_package: dict[str, Any],
 ) -> np.ndarray:
     """Cut the target object crop from the source frame."""
@@ -100,7 +100,7 @@ def build_vlm_frame_cropper_package(
 
 
 def resolve_source_frame(
-    input_layer_package: dict[str, Any],
+    input_layer_package: Any,
     vlm_frame_cropper_request_package: dict[str, Any],
 ) -> np.ndarray:
     """Retrieve the source frame associated with the crop request."""
@@ -108,14 +108,14 @@ def resolve_source_frame(
     _validate_request_package(vlm_frame_cropper_request_package)
 
     if (
-        input_layer_package["input_layer_frame_id"]
+        _package_get(input_layer_package, "input_layer_frame_id")
         != vlm_frame_cropper_request_package["vlm_frame_cropper_frame_id"]
     ):
         raise ValueError(
             "input_layer_frame_id does not match vlm_frame_cropper_frame_id."
         )
 
-    return input_layer_package["input_layer_image"]
+    return _package_get(input_layer_package, "input_layer_image")
 
 
 
@@ -145,7 +145,7 @@ def validate_crop_result(vlm_object_crop: np.ndarray) -> None:
 
 
 
-def _validate_input_layer_package(input_layer_package: dict[str, Any]) -> None:
+def _validate_input_layer_package(input_layer_package: Any) -> None:
     required_fields = [
         "input_layer_frame_id",
         "input_layer_timestamp",
@@ -153,14 +153,11 @@ def _validate_input_layer_package(input_layer_package: dict[str, Any]) -> None:
         "input_layer_source_type",
         "input_layer_resolution",
     ]
-    missing_fields = [
-        field_name for field_name in required_fields if field_name not in input_layer_package
-    ]
-    if missing_fields:
-        raise ValueError(
-            "input_layer_package is missing required fields: "
-            + ", ".join(missing_fields)
-        )
+    _validate_required_fields(
+        package=input_layer_package,
+        required_fields=required_fields,
+        package_name="input_layer_package",
+    )
 
 
 
@@ -211,6 +208,33 @@ def _validate_request_package(vlm_frame_cropper_request_package: dict[str, Any])
             "vlm_frame_cropper_request_package is missing required fields: "
             + ", ".join(missing_fields)
         )
+
+
+
+def _validate_required_fields(
+    package: Any,
+    required_fields: list[str],
+    package_name: str,
+) -> None:
+    missing_fields = [
+        field_name for field_name in required_fields if not _package_has(package, field_name)
+    ]
+    if missing_fields:
+        raise ValueError(
+            f"{package_name} is missing required fields: {', '.join(missing_fields)}"
+        )
+
+
+
+def _package_has(package: Any, field_name: str) -> bool:
+    return (isinstance(package, dict) and field_name in package) or hasattr(package, field_name)
+
+
+
+def _package_get(package: Any, field_name: str) -> Any:
+    if isinstance(package, dict):
+        return package[field_name]
+    return getattr(package, field_name)
 
 
 
