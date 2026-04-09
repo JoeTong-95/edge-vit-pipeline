@@ -10,5 +10,5 @@
 - Updated `visualize_yolo.py` to show on-screen performance metrics, including live and average FPS plus smoothed inference, draw, write, and loop timings.
 - Added device mode and inference-only FPS readouts to `visualize_yolo.py` so the overlay distinguishes full-loop FPS from pure inference throughput.
 - Removed the last-row timing breakdown from the on-screen YOLO overlay to keep the display focused on mode, FPS, and inference FPS.
-- Added README.md for the YOLO layer covering the public API, bundled local models, config-driven visualization flow, and SQLite metrics option in isualize_yolo.py.
-
+- Added `README.md` for the YOLO layer covering the public API, bundled local models, config-driven visualization flow, and SQLite metrics option in `visualize_yolo.py`.
+- Updated `visualize_yolo.py` to initialize and read frames through the real `input_layer`, so video and camera sources are normalized into `input_layer_package` and resized to `config_frame_resolution` before YOLO inference.
