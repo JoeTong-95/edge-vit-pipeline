@@ -56,7 +56,7 @@ def initialize_roi_layer(
 
 
 def update_roi_state(
-    input_layer_package: dict[str, Any],
+    input_layer_package: Any,
     yolo_layer_detections: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """
@@ -74,28 +74,26 @@ def update_roi_state(
 
     collect_roi_candidate_boxes(yolo_layer_detections)
 
+    frame_image = _package_get(input_layer_package, "input_layer_image")
     threshold = _state["config_roi_vehicle_count_threshold"]
     if threshold == 0:
-        computed_bounds = _full_frame_bounds(input_layer_package["input_layer_image"])
-        lock_roi_bounds(computed_bounds)
+        lock_roi_bounds(_full_frame_bounds(frame_image))
         return _snapshot_roi_state()
 
     if len(_state["roi_candidate_boxes"]) >= threshold:
-        computed_bounds = compute_roi_bounds(
-            frame_image=input_layer_package["input_layer_image"]
-        )
+        computed_bounds = compute_roi_bounds(frame_image=frame_image)
         lock_roi_bounds(computed_bounds)
 
     return _snapshot_roi_state()
 
 
 
-def apply_roi_to_frame(input_layer_package: dict[str, Any]) -> np.ndarray:
+def apply_roi_to_frame(input_layer_package: Any) -> np.ndarray:
     """Apply the active ROI to the input frame."""
     _assert_initialized()
     _validate_input_layer_package(input_layer_package)
 
-    frame_image = input_layer_package["input_layer_image"]
+    frame_image = _package_get(input_layer_package, "input_layer_image")
     if not _state["config_roi_enabled"] or not _state["roi_layer_locked"]:
         return pass_through_full_frame(frame_image)
 
@@ -104,7 +102,7 @@ def apply_roi_to_frame(input_layer_package: dict[str, Any]) -> np.ndarray:
 
 
 def build_roi_layer_package(
-    input_layer_package: dict[str, Any],
+    input_layer_package: Any,
     roi_layer_image: np.ndarray | None = None,
 ) -> dict[str, Any]:
     """Create the ROI package for downstream detection."""
@@ -114,13 +112,14 @@ def build_roi_layer_package(
     if roi_layer_image is None:
         roi_layer_image = apply_roi_to_frame(input_layer_package)
 
+    frame_image = _package_get(input_layer_package, "input_layer_image")
     roi_bounds = _state["roi_layer_bounds"]
     if roi_bounds is None:
-        roi_bounds = _full_frame_bounds(input_layer_package["input_layer_image"])
+        roi_bounds = _full_frame_bounds(frame_image)
 
     return {
-        "roi_layer_frame_id": input_layer_package["input_layer_frame_id"],
-        "roi_layer_timestamp": input_layer_package["input_layer_timestamp"],
+        "roi_layer_frame_id": _package_get(input_layer_package, "input_layer_frame_id"),
+        "roi_layer_timestamp": _package_get(input_layer_package, "input_layer_timestamp"),
         "roi_layer_image": roi_layer_image,
         "roi_layer_bounds": tuple(int(value) for value in roi_bounds),
         "roi_layer_enabled": _state["config_roi_enabled"],
@@ -197,7 +196,7 @@ def _snapshot_roi_state() -> dict[str, Any]:
 
 
 
-def _validate_input_layer_package(input_layer_package: dict[str, Any]) -> None:
+def _validate_input_layer_package(input_layer_package: Any) -> None:
     required_fields = [
         "input_layer_frame_id",
         "input_layer_timestamp",
@@ -205,14 +204,11 @@ def _validate_input_layer_package(input_layer_package: dict[str, Any]) -> None:
         "input_layer_source_type",
         "input_layer_resolution",
     ]
-    missing_fields = [
-        field_name for field_name in required_fields if field_name not in input_layer_package
-    ]
-    if missing_fields:
-        raise ValueError(
-            "input_layer_package is missing required fields: "
-            + ", ".join(missing_fields)
-        )
+    _validate_required_fields(
+        package=input_layer_package,
+        required_fields=required_fields,
+        package_name="input_layer_package",
+    )
 
 
 
@@ -231,6 +227,33 @@ def _validate_yolo_detections(yolo_layer_detections: list[dict[str, Any]]) -> No
                 "yolo detection is missing required fields: "
                 + ", ".join(missing_fields)
             )
+
+
+
+def _validate_required_fields(
+    package: Any,
+    required_fields: list[str],
+    package_name: str,
+) -> None:
+    missing_fields = [
+        field_name for field_name in required_fields if not _package_has(package, field_name)
+    ]
+    if missing_fields:
+        raise ValueError(
+            f"{package_name} is missing required fields: {', '.join(missing_fields)}"
+        )
+
+
+
+def _package_has(package: Any, field_name: str) -> bool:
+    return (isinstance(package, dict) and field_name in package) or hasattr(package, field_name)
+
+
+
+def _package_get(package: Any, field_name: str) -> Any:
+    if isinstance(package, dict):
+        return package[field_name]
+    return getattr(package, field_name)
 
 
 

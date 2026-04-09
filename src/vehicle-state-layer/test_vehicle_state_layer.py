@@ -5,6 +5,15 @@ Run from the project root:
     python src/vehicle-state-layer/test_vehicle_state_layer.py
 """
 
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+VLM_LAYER_DIR = ROOT / "src" / "vlm-layer"
+if str(VLM_LAYER_DIR) not in sys.path:
+    sys.path.insert(0, str(VLM_LAYER_DIR))
+
+from layer import VLMRawResult, build_vlm_layer_package
 from vehicle_state_layer import (
     build_vehicle_state_layer_package,
     get_vehicle_state_record,
@@ -12,6 +21,7 @@ from vehicle_state_layer import (
     update_vehicle_state_from_tracking,
     update_vehicle_state_from_vlm,
 )
+
 
 
 def _make_tracking_package(frame_id, track_ids, classes, statuses):
@@ -23,6 +33,7 @@ def _make_tracking_package(frame_id, track_ids, classes, statuses):
         "tracking_layer_confidence": [0.9 for _ in track_ids],
         "tracking_layer_status": statuses,
     }
+
 
 
 def main() -> None:
@@ -54,23 +65,21 @@ def main() -> None:
         )
     )
 
-    update_vehicle_state_from_vlm(
-        {
-            "vlm_layer_track_id": 101,
-            "vlm_layer_label": "dump_truck",
-            "vlm_layer_attributes": {
-                "truck_type": "dump_truck",
-                "wheel_count": 6,
-                "estimated_weight_kg": "12000-18000",
-            },
-        }
+    vlm_package = build_vlm_layer_package(
+        VLMRawResult(
+            vlm_layer_track_id="101",
+            vlm_layer_query_type="vehicle_semantics_v1",
+            vlm_layer_model_id="test-model",
+            vlm_layer_raw_text="truck_type: dump_truck\nwheel_count: 6\nestimated_weight_kg: 12000-18000",
+        )
     )
+    update_vehicle_state_from_vlm(vlm_package)
 
     record_101 = get_vehicle_state_record(101)
     record_202 = get_vehicle_state_record(202)
     assert record_101["vehicle_state_layer_last_seen_frame"] == 2
     assert record_101["vehicle_state_layer_truck_type"] == "dump_truck"
-    assert record_101["vehicle_state_layer_semantic_tags"]["wheel_count"] == 6
+    assert record_101["vehicle_state_layer_semantic_tags"]["wheel_count"] == "6"
     assert record_101["vehicle_state_layer_vlm_called"] is True
     assert record_202["vehicle_state_layer_lost_frame_count"] == 1
 
