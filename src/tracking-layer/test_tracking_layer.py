@@ -42,6 +42,26 @@ from tracker import (
 )
 
 
+def tracking_package_rows(tracking_pkg):
+    """Convert the tracking_layer_package into per-track rows for display."""
+    return [
+        {
+            "tracking_layer_track_id": track_id,
+            "tracking_layer_bbox": bbox,
+            "tracking_layer_detector_class": detector_class,
+            "tracking_layer_confidence": confidence,
+            "tracking_layer_status": status,
+        }
+        for track_id, bbox, detector_class, confidence, status in zip(
+            tracking_pkg["tracking_layer_track_id"],
+            tracking_pkg["tracking_layer_bbox"],
+            tracking_pkg["tracking_layer_detector_class"],
+            tracking_pkg["tracking_layer_confidence"],
+            tracking_pkg["tracking_layer_status"],
+        )
+    ]
+
+
 def build_fake_input_layer_package(frame, frame_id, fps):
     """Build an input_layer_package for testing (normally Layer 2 does this)."""
     return {
@@ -55,7 +75,6 @@ def build_fake_input_layer_package(frame, frame_id, fps):
 
 def run_video_mode(args):
     """Run YOLO detection + tracking on a video file."""
-    # Import YOLO layer functions (cross-layer dependency for testing)
     from detector import (
         initialize_yolo_layer,
         run_yolo_detection,
@@ -63,7 +82,6 @@ def run_video_mode(args):
         build_yolo_layer_package,
     )
 
-    # --- Open video ---
     cap = cv2.VideoCapture(args.video)
     if not cap.isOpened():
         print(f"ERROR: Could not open video: {args.video}")
@@ -75,14 +93,12 @@ def run_video_mode(args):
     print(f"FPS: {fps}, Total frames: {total_frames}")
     print()
 
-    # --- Initialize both layers ---
     initialize_yolo_layer(model_name=args.model, conf_threshold=args.conf,
                           device=args.device)
     print()
     initialize_tracking_layer(frame_rate=int(fps))
     print()
 
-    # --- Process frames ---
     frame_id = 0
     all_track_ids = set()
     all_packages = []
@@ -92,23 +108,18 @@ def run_video_mode(args):
         if not ret:
             break
 
-        # Layer 2 stand-in
         input_pkg = build_fake_input_layer_package(frame, frame_id, fps)
 
-        # Layer 4: YOLO detection
         raw_dets = run_yolo_detection(input_pkg)
         filtered_dets = filter_yolo_detections(raw_dets)
         yolo_pkg = build_yolo_layer_package(frame_id, filtered_dets)
 
-        # Layer 5: Tracking
         current_tracks = update_tracks(yolo_pkg)
         status_tracks = assign_tracking_status(current_tracks, frame_id)
         tracking_pkg = build_tracking_layer_package(frame_id, status_tracks)
 
-        # Print frames that have tracks
-        tracks = tracking_pkg["tracking_layer_tracks"]
+        tracks = tracking_package_rows(tracking_pkg)
         if tracks:
-            # Count by status
             new_count = sum(1 for t in tracks if t["tracking_layer_status"] == "new")
             active_count = sum(1 for t in tracks if t["tracking_layer_status"] == "active")
             lost_count = sum(1 for t in tracks if t["tracking_layer_status"] == "lost")
@@ -123,7 +134,7 @@ def run_video_mode(args):
 
             print(f"Frame {frame_id}: {' | '.join(status_summary)}")
             for trk in tracks:
-                if trk["tracking_layer_status"] != "lost":  # skip lost to reduce noise
+                if trk["tracking_layer_status"] != "lost":
                     bbox = [round(v, 1) for v in trk["tracking_layer_bbox"]]
                     print(f"  ID={trk['tracking_layer_track_id']} "
                           f"{trk['tracking_layer_detector_class']} "
@@ -143,7 +154,6 @@ def run_video_mode(args):
 
     cap.release()
 
-    # --- Summary ---
     print()
     print(f"Processed {frame_id} frames.")
     print(f"Unique track IDs seen: {sorted(all_track_ids)}")
@@ -176,7 +186,7 @@ def run_json_mode(args):
         status_tracks = assign_tracking_status(current_tracks, frame_id)
         tracking_pkg = build_tracking_layer_package(frame_id, status_tracks)
 
-        tracks = tracking_pkg["tracking_layer_tracks"]
+        tracks = tracking_package_rows(tracking_pkg)
         if tracks:
             visible = [t for t in tracks if t["tracking_layer_status"] != "lost"]
             if visible:
@@ -186,7 +196,8 @@ def run_json_mode(args):
                     print(f"  ID={trk['tracking_layer_track_id']} "
                           f"{trk['tracking_layer_detector_class']} "
                           f"[{trk['tracking_layer_status']}] "
-                          f"conf={trk['tracking_layer_confidence']:.2f}")
+                          f"conf={trk['tracking_layer_confidence']:.2f} "
+                          f"bbox={bbox}")
 
             for trk in tracks:
                 all_track_ids.add(trk["tracking_layer_track_id"])

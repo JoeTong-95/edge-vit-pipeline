@@ -1,23 +1,19 @@
 #!/usr/bin/env python3
 """
-visualize_tracking.py
-Draw bounding boxes, track IDs, and labels onto a video.
+visualize_yolo.py
+Draw YOLO detections onto a video without tracking.
 
-Run from src/tracking-layer:
-    python .\visualize_tracking.py
-    python .\visualize_tracking.py --show
-    python .\visualize_tracking.py --save-metrics
+Run from src/yolo-layer:
+    python .\visualize_yolo.py
+    python .\visualize_yolo.py --show
+    python .\visualize_yolo.py --save-metrics
 
 Run from project root:
-    python src/tracking-layer/visualize_tracking.py
-    python src/tracking-layer/visualize_tracking.py --show
+    python src/yolo-layer/visualize_yolo.py
+    python src/yolo-layer/visualize_yolo.py --show
 
 CLI arguments override values loaded from src/configuration-layer/config.yaml.
 Produces an annotated MP4 video and can optionally show a live preview window.
-Color coding:
-    GREEN  = new (first appearance)
-    BLUE   = active (continuing track)
-    RED    = lost (disappeared, showing last known position)
 """
 
 import argparse
@@ -30,23 +26,24 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 _THIS_DIR = Path(__file__).resolve().parent
-_YOLO_DIR = _THIS_DIR.parent / "yolo-layer"
 _CONFIG_DIR = _THIS_DIR.parent / "configuration-layer"
 _REPO_ROOT = _THIS_DIR.parent.parent
 sys.path.insert(0, str(_THIS_DIR))
-sys.path.insert(0, str(_YOLO_DIR))
 sys.path.insert(0, str(_CONFIG_DIR))
 
 import cv2
 from config_node import get_config_value, load_config, validate_config
-from detector import initialize_yolo_layer, run_yolo_detection, filter_yolo_detections, build_yolo_layer_package
-from tracker import initialize_tracking_layer, update_tracks, assign_tracking_status, build_tracking_layer_package
+from detector import (
+    build_yolo_layer_package,
+    filter_yolo_detections,
+    initialize_yolo_layer,
+    run_yolo_detection,
+)
 
-COLORS = {
-    "new": (0, 255, 0),
-    "active": (255, 180, 0),
-    "lost": (0, 0, 255),
-}
+BOX_COLOR = (0, 255, 0)
+TEXT_COLOR = (0, 0, 0)
+HUD_TEXT_COLOR = (255, 255, 255)
+HUD_SHADOW_COLOR = (0, 0, 0)
 
 
 def update_metric_ema(metrics, metric_name, sample_value, alpha=0.2):
@@ -124,7 +121,7 @@ def insert_run_record(connection, args, fps, width, height):
         """,
         (
             run_id,
-            "tracking",
+            "yolo",
             datetime.now(timezone.utc).isoformat(),
             args.video,
             args.model,
@@ -142,14 +139,14 @@ def insert_run_record(connection, args, fps, width, height):
     return run_id
 
 
-def insert_frame_record(connection, run_id, frame_id, elapsed_seconds, fps_actual, average_fps, infer_ms, infer_fps, average_infer_fps, total_count, new_count, active_count, lost_count):
+def insert_frame_record(connection, run_id, frame_id, elapsed_seconds, fps_actual, average_fps, infer_ms, infer_fps, average_infer_fps, total_count):
     connection.execute(
         """
         INSERT INTO visualizer_frames (
             run_id, frame_id, elapsed_seconds, fps_actual, average_fps,
             infer_ms, infer_fps, average_infer_fps, count_total,
             count_new, count_active, count_lost
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)
         """,
         (
             run_id,
@@ -161,80 +158,41 @@ def insert_frame_record(connection, run_id, frame_id, elapsed_seconds, fps_actua
             float(infer_fps),
             float(average_infer_fps),
             int(total_count),
-            int(new_count),
-            int(active_count),
-            int(lost_count),
         ),
     )
 
 
-def tracking_package_rows(tracking_pkg):
-    return [
-        {
-            "tracking_layer_track_id": track_id,
-            "tracking_layer_bbox": bbox,
-            "tracking_layer_detector_class": detector_class,
-            "tracking_layer_confidence": confidence,
-            "tracking_layer_status": status,
-        }
-        for track_id, bbox, detector_class, confidence, status in zip(
-            tracking_pkg["tracking_layer_track_id"],
-            tracking_pkg["tracking_layer_bbox"],
-            tracking_pkg["tracking_layer_detector_class"],
-            tracking_pkg["tracking_layer_confidence"],
-            tracking_pkg["tracking_layer_status"],
-        )
-    ]
-
-
-def draw_tracks(frame, tracking_pkg):
-    for trk in tracking_package_rows(tracking_pkg):
-        status = trk["tracking_layer_status"]
-        color = COLORS.get(status, (200, 200, 200))
-        x1, y1, x2, y2 = [int(v) for v in trk["tracking_layer_bbox"]]
-        thickness = 3 if status != "lost" else 1
-        cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
-        tid = trk["tracking_layer_track_id"]
-        cls = trk["tracking_layer_detector_class"]
-        conf = trk["tracking_layer_confidence"]
-        label = f"ID={tid} {cls} {conf:.2f}"
+def draw_detections(frame, yolo_pkg):
+    for det in yolo_pkg["yolo_layer_detections"]:
+        x1, y1, x2, y2 = [int(v) for v in det["yolo_detection_bbox"]]
+        label = f"{det['yolo_detection_class']} {det['yolo_detection_confidence']:.2f}"
+        cv2.rectangle(frame, (x1, y1), (x2, y2), BOX_COLOR, 2)
         font = cv2.FONT_HERSHEY_SIMPLEX
         font_scale = 0.6
         font_thickness = 2
         (text_w, text_h), baseline = cv2.getTextSize(label, font, font_scale, font_thickness)
         label_y = y1 - 8 if y1 > 30 else y2 + text_h + 8
         label_x = x1
-        cv2.rectangle(frame, (label_x, label_y - text_h - 4), (label_x + text_w + 4, label_y + 4), color, -1)
-        cv2.putText(frame, label, (label_x + 2, label_y), font, font_scale, (0, 0, 0), font_thickness, cv2.LINE_AA)
+        cv2.rectangle(frame, (label_x, label_y - text_h - 4), (label_x + text_w + 4, label_y + 4), BOX_COLOR, -1)
+        cv2.putText(frame, label, (label_x + 2, label_y), font, font_scale, TEXT_COLOR, font_thickness, cv2.LINE_AA)
     return frame
 
 
-def draw_hud(frame, frame_id, tracking_pkg, fps_actual, average_fps, infer_fps, average_infer_fps, device_mode):
-    tracks = tracking_package_rows(tracking_pkg)
-    new_count = sum(1 for t in tracks if t["tracking_layer_status"] == "new")
-    active_count = sum(1 for t in tracks if t["tracking_layer_status"] == "active")
-    lost_count = sum(1 for t in tracks if t["tracking_layer_status"] == "lost")
+def draw_hud(frame, frame_id, yolo_pkg, fps_actual, average_fps, infer_fps, average_infer_fps, device_mode):
     lines = [
         f"Frame: {frame_id}",
         f"Mode: {device_mode}",
         f"FPS: {fps_actual:.1f} | Avg: {average_fps:.1f}",
         f"Infer FPS: {infer_fps:.1f} | Avg: {average_infer_fps:.1f}",
-        f"Tracks: {new_count} new | {active_count} active | {lost_count} lost",
+        f"Detections: {len(yolo_pkg['yolo_layer_detections'])}",
     ]
     font = cv2.FONT_HERSHEY_SIMPLEX
     y_offset = 30
     for line in lines:
-        cv2.putText(frame, line, (12, y_offset), font, 0.7, (0, 0, 0), 3, cv2.LINE_AA)
-        cv2.putText(frame, line, (10, y_offset), font, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+        cv2.putText(frame, line, (12, y_offset), font, 0.7, HUD_SHADOW_COLOR, 3, cv2.LINE_AA)
+        cv2.putText(frame, line, (10, y_offset), font, 0.7, HUD_TEXT_COLOR, 2, cv2.LINE_AA)
         y_offset += 30
     return frame
-
-
-def filter_tracking_package(tracking_pkg, keep_indexes):
-    return {
-        key: [value[index] for index in keep_indexes] if isinstance(value, list) else value
-        for key, value in tracking_pkg.items()
-    }
 
 
 def _resolve_repo_path(path_value: str) -> str:
@@ -253,21 +211,20 @@ def load_runtime_settings():
         "model": get_config_value(config, "config_yolo_model"),
         "conf": get_config_value(config, "config_yolo_confidence_threshold"),
         "device": get_config_value(config, "config_device"),
-        "output": str((_REPO_ROOT / "data" / "tracked_output.mp4").resolve()),
+        "output": str((_REPO_ROOT / "data" / "yolo_output.mp4").resolve()),
         "metrics_db": str((_REPO_ROOT / "data" / "visualizer_metrics.sqlite").resolve()),
     }
 
 
 def main():
     runtime_defaults = load_runtime_settings()
-    parser = argparse.ArgumentParser(description="Visualize tracking on video")
+    parser = argparse.ArgumentParser(description="Visualize YOLO detections on video")
     parser.add_argument("--video", default=runtime_defaults["video"], help="Input video path")
     parser.add_argument("--output", default=runtime_defaults["output"], help="Output annotated video path")
     parser.add_argument("--model", default=runtime_defaults["model"], help="YOLO model")
     parser.add_argument("--conf", type=float, default=runtime_defaults["conf"], help="Confidence threshold")
     parser.add_argument("--device", default=runtime_defaults["device"], help="Device: cpu, cuda")
     parser.add_argument("--max-frames", type=int, default=0, help="Stop after N frames (0 = all)")
-    parser.add_argument("--skip-lost", action="store_true", help="Don't draw lost tracks")
     parser.add_argument("--show", action="store_true", help="Show a live preview window while processing")
     parser.add_argument("--save-metrics", action="store_true", help="Save run metadata and frame metrics to a SQLite database")
     parser.add_argument("--metrics-db", default=runtime_defaults["metrics_db"], help="SQLite database path used when --save-metrics is enabled")
@@ -310,13 +267,11 @@ def main():
 
     initialize_yolo_layer(model_name=args.model, conf_threshold=args.conf, device=args.device)
     print()
-    initialize_tracking_layer(frame_rate=int(fps))
-    print()
 
     frame_id = 0
     start_time = time.time()
     metrics = {}
-    total_yolo_seconds = 0.0
+    total_infer_seconds = 0.0
 
     try:
         while True:
@@ -333,35 +288,24 @@ def main():
                 "input_layer_resolution": (width, height),
             }
 
-            yolo_start = time.perf_counter()
+            infer_start = time.perf_counter()
             raw_dets = run_yolo_detection(input_pkg)
             filtered_dets = filter_yolo_detections(raw_dets)
             yolo_pkg = build_yolo_layer_package(frame_id, filtered_dets)
-            yolo_ms = (time.perf_counter() - yolo_start) * 1000.0
-            update_metric_ema(metrics, "yolo_ms", yolo_ms)
-            total_yolo_seconds += yolo_ms / 1000.0
-
-            tracking_start = time.perf_counter()
-            current_tracks = update_tracks(yolo_pkg)
-            status_tracks = assign_tracking_status(current_tracks, frame_id)
-            tracking_pkg = build_tracking_layer_package(frame_id, status_tracks)
-            track_ms = (time.perf_counter() - tracking_start) * 1000.0
-            update_metric_ema(metrics, "track_ms", track_ms)
-
-            if args.skip_lost:
-                keep_indexes = [index for index, status in enumerate(tracking_pkg["tracking_layer_status"]) if status != "lost"]
-                tracking_pkg = filter_tracking_package(tracking_pkg, keep_indexes)
+            infer_ms = (time.perf_counter() - infer_start) * 1000.0
+            update_metric_ema(metrics, "infer_ms", infer_ms)
+            total_infer_seconds += infer_ms / 1000.0
 
             elapsed = time.time() - start_time
             fps_actual = (frame_id + 1) / elapsed if elapsed > 0 else 0
             average_fps = fps_actual
-            infer_fps = 1000.0 / yolo_ms if yolo_ms > 0 else 0.0
-            average_infer_fps = (frame_id + 1) / total_yolo_seconds if total_yolo_seconds > 0 else 0.0
+            infer_fps = 1000.0 / infer_ms if infer_ms > 0 else 0.0
+            average_infer_fps = (frame_id + 1) / total_infer_seconds if total_infer_seconds > 0 else 0.0
 
             draw_start = time.perf_counter()
             annotated = frame.copy()
-            annotated = draw_tracks(annotated, tracking_pkg)
-            annotated = draw_hud(annotated, frame_id, tracking_pkg, fps_actual, average_fps, infer_fps, average_infer_fps, args.device)
+            annotated = draw_detections(annotated, yolo_pkg)
+            annotated = draw_hud(annotated, frame_id, yolo_pkg, fps_actual, average_fps, infer_fps, average_infer_fps, args.device)
             update_metric_ema(metrics, "draw_ms", (time.perf_counter() - draw_start) * 1000.0)
 
             write_start = time.perf_counter()
@@ -369,23 +313,18 @@ def main():
             update_metric_ema(metrics, "write_ms", (time.perf_counter() - write_start) * 1000.0)
 
             if args.show:
-                cv2.imshow("Tracking Visualizer", annotated)
+                cv2.imshow("YOLO Visualizer", annotated)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     print("Preview stopped by user.")
                     break
 
             update_metric_ema(metrics, "loop_ms", (time.perf_counter() - loop_start) * 1000.0)
 
-            track_rows = tracking_package_rows(tracking_pkg)
-            new_count = sum(1 for track in track_rows if track["tracking_layer_status"] == "new")
-            active_count = sum(1 for track in track_rows if track["tracking_layer_status"] == "active")
-            lost_count = sum(1 for track in track_rows if track["tracking_layer_status"] == "lost")
-
             if metrics_connection is not None and run_id is not None:
-                insert_frame_record(metrics_connection, run_id, frame_id, elapsed, fps_actual, average_fps, yolo_ms, infer_fps, average_infer_fps, len(track_rows), new_count, active_count, lost_count)
+                insert_frame_record(metrics_connection, run_id, frame_id, elapsed, fps_actual, average_fps, infer_ms, infer_fps, average_infer_fps, len(yolo_pkg["yolo_layer_detections"]))
 
             if frame_id % 50 == 0:
-                print(f"Frame {frame_id}/{total_frames} - {len(track_rows)} tracks - {fps_actual:.1f} FPS - inferFPS {average_infer_fps:.1f} - yolo {metrics.get('yolo_ms', 0.0):.1f} ms - track {metrics.get('track_ms', 0.0):.1f} ms - loop {metrics.get('loop_ms', 0.0):.1f} ms")
+                print(f"Frame {frame_id}/{total_frames} - {len(yolo_pkg['yolo_layer_detections'])} detections - {fps_actual:.1f} FPS - inferFPS {average_infer_fps:.1f} - infer {metrics.get('infer_ms', 0.0):.1f} ms - loop {metrics.get('loop_ms', 0.0):.1f} ms")
 
             frame_id += 1
             if args.max_frames > 0 and frame_id >= args.max_frames:

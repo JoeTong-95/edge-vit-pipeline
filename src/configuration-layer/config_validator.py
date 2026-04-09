@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Mapping
 
 from config_schema import (
@@ -9,6 +10,9 @@ from config_schema import (
     CONFIG_REQUIRED_PATH_INPUT_SOURCE,
 )
 from config_types import ConfigurationLayerConfig
+
+_CONFIG_LAYER_DIR = Path(__file__).resolve().parent
+_REPO_ROOT = _CONFIG_LAYER_DIR.parent.parent
 
 
 def _to_mapping(config: ConfigurationLayerConfig | Mapping[str, Any]) -> dict[str, Any]:
@@ -45,6 +49,17 @@ def validate_config_values(config: ConfigurationLayerConfig | Mapping[str, Any])
         raise ValueError(
             "config_input_path is required when config_input_source is 'video'."
         )
+
+    if config_values["config_input_source"] == CONFIG_REQUIRED_PATH_INPUT_SOURCE:
+        input_path = Path(config_values["config_input_path"])
+        candidate_paths = [input_path]
+        if not input_path.is_absolute():
+            candidate_paths.append(_REPO_ROOT / input_path)
+
+        if not any(path.exists() for path in candidate_paths):
+            raise FileNotFoundError(
+                f"config_input_path does not exist: {config_values['config_input_path']}"
+            )
 
     if config_values["config_input_source"] == "camera" and config_values["config_input_path"]:
         raise ValueError(
