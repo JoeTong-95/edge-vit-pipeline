@@ -79,3 +79,9 @@ def validate_config_values(config: ConfigurationLayerConfig | Mapping[str, Any])
 
     if config_values["config_vlm_enabled"] and not config_values["config_vlm_model"]:
         raise ValueError("config_vlm_model is required when config_vlm_enabled is true.")
+
+    if not isinstance(config_values["config_vlm_crop_feedback_enabled"], bool):
+        raise ValueError("config_vlm_crop_feedback_enabled must be a bool.")
+
+    if int(config_values["config_vlm_crop_cache_size"]) <= 0:
+        raise ValueError("config_vlm_crop_cache_size must be greater than 0.")

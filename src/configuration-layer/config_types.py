@@ -16,6 +16,8 @@ class ConfigurationLayerConfig:
     config_yolo_confidence_threshold: float
     config_vlm_enabled: bool
     config_vlm_model: str
+    config_vlm_crop_feedback_enabled: bool
+    config_vlm_crop_cache_size: int
     config_scene_awareness_enabled: bool
     config_metadata_output_enabled: bool
     config_evaluation_output_enabled: bool

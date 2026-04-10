@@ -51,6 +51,8 @@ def normalize_config(raw_config: dict[str, Any]) -> ConfigurationLayerConfig:
         config_yolo_confidence_threshold=float(merged["config_yolo_confidence_threshold"]),
         config_vlm_enabled=_normalize_bool(merged["config_vlm_enabled"], "config_vlm_enabled"),
         config_vlm_model=str(merged["config_vlm_model"]).strip(),
+        config_vlm_crop_feedback_enabled=_normalize_bool(merged["config_vlm_crop_feedback_enabled"], "config_vlm_crop_feedback_enabled"),
+        config_vlm_crop_cache_size=int(merged["config_vlm_crop_cache_size"]),
         config_scene_awareness_enabled=_normalize_bool(
             merged["config_scene_awareness_enabled"],
             "config_scene_awareness_enabled",

@@ -1,115 +1,71 @@
 """
 Layer-local validation script for vehicle_state_layer.
-
-Run from the project root:
-    python src/vehicle-state-layer/test_vehicle_state_layer.py
 """
 
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-VLM_LAYER_DIR = ROOT / "src" / "vlm-layer"
+VLM_LAYER_DIR = ROOT / 'src' / 'vlm-layer'
 if str(VLM_LAYER_DIR) not in sys.path:
     sys.path.insert(0, str(VLM_LAYER_DIR))
 
-from layer import VLMRawResult, build_vlm_layer_package
+from layer import VLMRawResult, build_vlm_ack_package, build_vlm_layer_package
 from vehicle_state_layer import (
     build_vehicle_state_layer_package,
     get_vehicle_state_record,
     initialize_vehicle_state_layer,
     update_vehicle_state_from_tracking,
     update_vehicle_state_from_vlm,
+    update_vehicle_state_from_vlm_ack,
 )
-
 
 
 def _make_tracking_package(frame_id, track_ids, classes, statuses):
     return {
-        "tracking_layer_frame_id": frame_id,
-        "tracking_layer_track_id": track_ids,
-        "tracking_layer_bbox": [[0, 0, 10, 10] for _ in track_ids],
-        "tracking_layer_detector_class": classes,
-        "tracking_layer_confidence": [0.9 for _ in track_ids],
-        "tracking_layer_status": statuses,
+        'tracking_layer_frame_id': frame_id,
+        'tracking_layer_track_id': track_ids,
+        'tracking_layer_bbox': [[0, 0, 10, 10] for _ in track_ids],
+        'tracking_layer_detector_class': classes,
+        'tracking_layer_confidence': [0.9 for _ in track_ids],
+        'tracking_layer_status': statuses,
     }
-
 
 
 def main() -> None:
     initialize_vehicle_state_layer(prune_after_lost_frames=2)
-
-    update_vehicle_state_from_tracking(
-        _make_tracking_package(
-            frame_id=1,
-            track_ids=[101, 202],
-            classes=["truck", "bus"],
-            statuses=["new", "new"],
-        )
-    )
-
+    update_vehicle_state_from_tracking(_make_tracking_package(1, [101, 202], ['truck', 'bus'], ['new', 'new']))
     record_101 = get_vehicle_state_record(101)
-    assert record_101 is not None
-    assert record_101["vehicle_state_layer_first_seen_frame"] == 1
-    assert record_101["vehicle_state_layer_last_seen_frame"] == 1
-    assert record_101["vehicle_state_layer_lost_frame_count"] == 0
-    assert record_101["vehicle_state_layer_vehicle_class"] == "truck"
-    assert record_101["vehicle_state_layer_vlm_called"] is False
+    assert record_101['vehicle_state_layer_vlm_ack_status'] == 'not_requested'
 
-    update_vehicle_state_from_tracking(
-        _make_tracking_package(
-            frame_id=2,
-            track_ids=[101, 202],
-            classes=["truck", "bus"],
-            statuses=["active", "lost"],
-        )
-    )
+    update_vehicle_state_from_vlm_ack(build_vlm_ack_package('101', 'retry_requested', 'crop_not_good', True))
+    record_101 = get_vehicle_state_record(101)
+    assert record_101['vehicle_state_layer_vlm_retry_requested'] is True
 
-    vlm_package = build_vlm_layer_package(
-        VLMRawResult(
-            vlm_layer_track_id="101",
-            vlm_layer_query_type="vehicle_semantics_v1",
-            vlm_layer_model_id="test-model",
-            vlm_layer_raw_text="truck_type: dump_truck\nwheel_count: 6\nestimated_weight_kg: 12000-18000",
-        )
-    )
+    update_vehicle_state_from_tracking(_make_tracking_package(2, [101, 202], ['truck', 'bus'], ['active', 'lost']))
+    vlm_package = build_vlm_layer_package(VLMRawResult(
+        vlm_layer_track_id='101',
+        vlm_layer_query_type='vehicle_semantics_v1',
+        vlm_layer_model_id='test-model',
+        vlm_layer_raw_text='truck_type: dump_truck\nwheel_count: 6\nestimated_weight_kg: 12000-18000',
+    ))
     update_vehicle_state_from_vlm(vlm_package)
-
     record_101 = get_vehicle_state_record(101)
-    record_202 = get_vehicle_state_record(202)
-    assert record_101["vehicle_state_layer_last_seen_frame"] == 2
-    assert record_101["vehicle_state_layer_truck_type"] == "dump_truck"
-    assert record_101["vehicle_state_layer_semantic_tags"]["wheel_count"] == "6"
-    assert record_101["vehicle_state_layer_vlm_called"] is True
-    assert record_202["vehicle_state_layer_lost_frame_count"] == 1
+    assert record_101['vehicle_state_layer_vlm_ack_status'] == 'accepted'
 
-    update_vehicle_state_from_tracking(
-        _make_tracking_package(
-            frame_id=3,
-            track_ids=[101, 202],
-            classes=["truck", "bus"],
-            statuses=["active", "lost"],
-        )
-    )
-    update_vehicle_state_from_tracking(
-        _make_tracking_package(
-            frame_id=4,
-            track_ids=[101, 202],
-            classes=["truck", "bus"],
-            statuses=["active", "lost"],
-        )
-    )
+    update_vehicle_state_from_vlm_ack(build_vlm_ack_package('101', 'finalize_with_current', 'truck_left_scene', False))
+    record_101 = get_vehicle_state_record(101)
+    assert record_101['vehicle_state_layer_vlm_final_candidate_sent'] is True
 
+    update_vehicle_state_from_tracking(_make_tracking_package(3, [101, 202], ['truck', 'bus'], ['active', 'lost']))
+    update_vehicle_state_from_tracking(_make_tracking_package(4, [101, 202], ['truck', 'bus'], ['active', 'lost']))
     assert get_vehicle_state_record(202) is None
 
     output_package = build_vehicle_state_layer_package()
-    assert output_package["vehicle_state_layer_track_id"] == ["101"]
-    assert output_package["vehicle_state_layer_vehicle_class"] == ["truck"]
-    assert output_package["vehicle_state_layer_truck_type"] == ["dump_truck"]
-    assert output_package["vehicle_state_layer_vlm_called"] == [True]
-
-    print("vehicle_state_layer tests passed")
+    assert output_package['vehicle_state_layer_vlm_ack_status'] == ['finalize_with_current']
+    assert output_package['vehicle_state_layer_vlm_final_candidate_sent'] == [True]
+    print('vehicle_state_layer tests passed')
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

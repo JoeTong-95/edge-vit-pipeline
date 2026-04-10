@@ -291,7 +291,7 @@ def load_runtime_settings():
         "model": get_config_value(config, "config_yolo_model"),
         "conf": get_config_value(config, "config_yolo_confidence_threshold"),
         "device": get_config_value(config, "config_device"),
-        "output": str((_REPO_ROOT / "data" / "tracked_output.mp4").resolve()),
+        "output": "",
         "metrics_db": str((_REPO_ROOT / "data" / "visualizer_metrics.sqlite").resolve()),
     }
 
@@ -312,7 +312,7 @@ def main():
     parser.add_argument("--show", action="store_true", help="Show a live preview window while processing")
     parser.add_argument("--save-metrics", action="store_true", help="Save run metadata and frame metrics to a SQLite database")
     parser.add_argument("--metrics-db", default=runtime_defaults["metrics_db"], help="SQLite database path used when --save-metrics is enabled")
-    parser.add_argument("--output", default=runtime_defaults["output"], help="Output annotated video path")
+    parser.add_argument("--output", default=runtime_defaults["output"], help="Optional output annotated video path")
     args = parser.parse_args()
 
     frame_resolution = tuple(runtime_defaults["frame_resolution"])
@@ -332,12 +332,15 @@ def main():
         print(f"Metrics DB:   {args.metrics_db}")
     print()
 
-    os.makedirs(os.path.dirname(args.output) if os.path.dirname(args.output) else ".", exist_ok=True)
+    if args.output:
+        os.makedirs(os.path.dirname(args.output) if os.path.dirname(args.output) else ".", exist_ok=True)
     os.makedirs(os.path.dirname(args.metrics_db) if os.path.dirname(args.metrics_db) else ".", exist_ok=True)
-    out = cv2.VideoWriter(args.output, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
-    if not out.isOpened():
-        print(f"ERROR: Could not create output video: {args.output}")
-        sys.exit(1)
+    out = None
+    if args.output:
+        out = cv2.VideoWriter(args.output, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
+        if not out.isOpened():
+            print(f"ERROR: Could not create output video: {args.output}")
+            sys.exit(1)
 
     metrics_connection = None
     run_id = None
@@ -407,7 +410,8 @@ def main():
             update_metric_ema(metrics, "draw_ms", (time.perf_counter() - draw_start) * 1000.0)
 
             write_start = time.perf_counter()
-            out.write(annotated)
+            if out is not None:
+                out.write(annotated)
             update_metric_ema(metrics, "write_ms", (time.perf_counter() - write_start) * 1000.0)
 
             if args.show:
@@ -435,7 +439,8 @@ def main():
             processed_frames = frame_id
     finally:
         input_layer.close_input_layer()
-        out.release()
+        if out is not None:
+            out.release()
         cv2.destroyAllWindows()
         if metrics_connection is not None:
             metrics_connection.commit()

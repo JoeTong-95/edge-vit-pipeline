@@ -1,15 +1,17 @@
 config_device: cuda
 config_input_source: video
-config_input_path: data/sample.mp4
+config_input_path: data/sample3.mp4
 config_frame_resolution:
   - 640
   - 360
 config_roi_enabled: true
-config_roi_vehicle_count_threshold: 1000
+config_roi_vehicle_count_threshold: 10
 config_yolo_model: yolov10n.pt
-config_yolo_confidence_threshold: 0.25
-config_vlm_enabled: false
-config_vlm_model: "LOL"
+config_yolo_confidence_threshold: 0.35
+config_vlm_enabled: true
+config_vlm_model: src/vlm-layer/Qwen3.5-0.8B
+config_vlm_crop_feedback_enabled: false # feature not working well, strongly suggest kept disabled
+config_vlm_crop_cache_size: 50
 config_scene_awareness_enabled: false
 config_metadata_output_enabled: true
 config_evaluation_output_enabled: false

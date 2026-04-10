@@ -65,7 +65,7 @@ def load_runtime_settings():
         "device": get_config_value(config, "config_device"),
         "roi_enabled": get_config_value(config, "config_roi_enabled"),
         "roi_threshold": get_config_value(config, "config_roi_vehicle_count_threshold"),
-        "output": str((_REPO_ROOT / "data" / "roi_visualization.mp4").resolve()),
+        "output": "",
     }
 
 
@@ -231,16 +231,17 @@ def main():
     parser.add_argument("--gstreamer", action="store_true")
     parser.add_argument("--max-frames", type=int, default=0)
     parser.add_argument("--show", action="store_true")
-    parser.add_argument("--output", default=defaults["output"])
+    parser.add_argument("--output", default=defaults["output"], help="Optional output video path")
     args = parser.parse_args()
 
     frame_resolution = tuple(defaults["frame_resolution"])
     fps, width, height = probe_video_metadata(args.input_source, args.video, frame_resolution)
-    os.makedirs(os.path.dirname(args.output) if os.path.dirname(args.output) else ".", exist_ok=True)
-
-    out = cv2.VideoWriter(args.output, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width + max(360, width // 2), height))
-    if not out.isOpened():
-        raise RuntimeError(f"Could not create output video: {args.output}")
+    out = None
+    if args.output:
+        os.makedirs(os.path.dirname(args.output) if os.path.dirname(args.output) else ".", exist_ok=True)
+        out = cv2.VideoWriter(args.output, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width + max(360, width // 2), height))
+        if not out.isOpened():
+            raise RuntimeError(f"Could not create output video: {args.output}")
 
     input_layer = InputLayer()
     input_layer.initialize_input_layer(
@@ -296,7 +297,8 @@ def main():
                 args.roi_threshold,
                 len(yolo_pkg["yolo_layer_detections"]),
             )
-            out.write(canvas)
+            if out is not None:
+                out.write(canvas)
 
             if args.show:
                 cv2.imshow("ROI Visualizer", canvas)
@@ -307,10 +309,12 @@ def main():
                 break
     finally:
         input_layer.close_input_layer()
-        out.release()
+        if out is not None:
+            out.release()
         cv2.destroyAllWindows()
 
-    print(f"Saved ROI visualization to: {args.output}")
+    if args.output:
+        print(f"Saved ROI visualization to: {args.output}")
 
 
 if __name__ == "__main__":

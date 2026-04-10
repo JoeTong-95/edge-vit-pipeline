@@ -97,6 +97,40 @@ This is a strong integration role because these layers sit at the boundary betwe
 
 ## Layer Overview
 
+
+## Truck Type Semantics
+
+The current pipeline contract already reserves `vehicle_state_layer_truck_type` as a stable stored field, but the meaning of that field should be explicit:
+
+- `truck_type` is an optional semantic subtype inferred by the VLM path.
+- `truck_type` is more specific than the detector class labels `truck` or `bus`.
+- `truck_type` should stay stable, human-readable, and low-cardinality so it can be stored in metadata and compared across runs.
+- if the crop is not clear enough to support subtype classification, the system should prefer `unknown` rather than inventing a subtype.
+
+Recommended v1 truck-type vocabulary:
+
+- `unknown`
+- `pickup_truck`
+- `box_truck`
+- `dump_truck`
+- `cement_mixer`
+- `semi_truck`
+- `flatbed_truck`
+- `garbage_truck`
+- `tow_truck`
+- `tank_truck`
+- `fire_truck`
+- `bus`
+- `van`
+
+Important notes:
+
+- this vocabulary is a semantic metadata contract, not a YOLO detector-class contract
+- the detector may still only output `truck` or `bus`
+- the VLM layer may normalize a free-form model response into one of the recommended values above
+- downstream metadata output should treat `truck_type` as optional and allow `unknown`
+
+
 ### 1. Configuration Layer
 
 #### config_node
@@ -119,11 +153,13 @@ Typical controls:
 - `config_input_path`: file path used when `config_input_source` is `video`.
 - `config_frame_resolution`: target frame resolution used by the pipeline.
 - `config_roi_enabled`: enable or disable ROI-based cropping.
-- `config_roi_vehicle_count_threshold`: number of vehicle detections required before ROI is locked.
+- `config_roi_vehicle_count_threshold`: number of unique-ish startup vehicle detections required before ROI is locked.
 - `config_yolo_model`: YOLO model variant used for vehicle detection.
 - `config_yolo_confidence_threshold`: minimum detection confidence accepted from YOLO.
 - `config_vlm_enabled`: enable or disable the object-level VLM enrichment path.
 - `config_vlm_model`: VLM model used for semantic inference.
+- `config_vlm_crop_feedback_enabled`: controls whether VLM may ask the cropper for a fresh candidate round after the first dispatch.
+- `config_vlm_crop_cache_size`: number of candidate crops cached per track before the cropper-side selector dispatches one crop to VLM.
 - `config_scene_awareness_enabled`: enable or disable the optional full-frame scene-awareness path.
 - `config_metadata_output_enabled`: enable or disable structured metadata output.
 - `config_evaluation_output_enabled`: enable or disable evaluation and telemetry output.
@@ -283,7 +319,7 @@ Internal functions:
 
 Parameters used by this node:
 
-- `config_roi_vehicle_count_threshold`: minimum number of vehicle detections needed before ROI lock.
+- `config_roi_vehicle_count_threshold`: minimum number of unique-ish startup vehicle detections needed before ROI lock.
 
 Important notes:
 
@@ -441,6 +477,7 @@ Public functions:
 - `initialize_vehicle_state_layer`: prepare empty persistent vehicle state.
 - `update_vehicle_state_from_tracking`: update object state using tracking data.
 - `update_vehicle_state_from_vlm`: update stored semantic fields using VLM results.
+- `update_vehicle_state_from_vlm_ack`: persist VLM acknowledgement decisions such as retry or finalize.
 - `get_vehicle_state_record`: return the current state record for one track.
 - `build_vehicle_state_layer_package`: create the vehicle state package for downstream output.
 
@@ -464,6 +501,9 @@ Package fields:
 - `vehicle_state_layer_truck_type`: semantic truck subtype when available.
 - `vehicle_state_layer_semantic_tags`: stored semantic labels or attributes.
 - `vehicle_state_layer_vlm_called`: whether semantic enrichment has already been requested or recorded.
+- `vehicle_state_layer_vlm_ack_status`: latest VLM acknowledgement state for the track.
+- `vehicle_state_layer_vlm_retry_requested`: whether VLM has explicitly asked for a better crop.
+- `vehicle_state_layer_vlm_final_candidate_sent`: whether the cropper already sent the final best-available crop after the object left scope.
 
 Ownership:
 
@@ -481,6 +521,7 @@ Internal functions:
 - `create_vehicle_state_record`: create the initial state record for a newly tracked object.
 - `merge_tracking_into_vehicle_state`: apply tracking updates to the stored state.
 - `merge_vlm_into_vehicle_state`: apply semantic enrichment to the stored state.
+- `merge_vlm_ack_into_vehicle_state`: apply retry or finalize acknowledgements to the stored state.
 - `prune_vehicle_state_records`: remove or archive stale state records when needed.
 
 Interacts with:
@@ -504,6 +545,10 @@ Public functions:
 - `build_vlm_frame_cropper_request_package`: create the request package for object cropping.
 - `extract_vlm_object_crop`: cut the target object crop from the source frame.
 - `build_vlm_frame_cropper_package`: create the crop package for VLM inference.
+- `initialize_vlm_crop_cache`: prepare the local per-track candidate cache used before one-shot VLM dispatch.
+- `update_vlm_crop_cache`: add or refresh one candidate crop for a track.
+- `build_vlm_dispatch_package`: choose and emit the one crop that should actually be sent to VLM.
+- `register_vlm_ack_package`: update cropper-side dispatch state using VLM acknowledgement feedback.
 
 Suggested external packages:
 
@@ -513,6 +558,8 @@ Suggested external packages:
 Config parameters used:
 
 - `config_vlm_enabled`: controls whether crop requests should be prepared for the VLM path.
+- `config_vlm_crop_feedback_enabled`: when true, cropper may reopen collection after a VLM retry request; when false, the first dispatched crop completes that track.
+- `config_vlm_crop_cache_size`: controls how many candidate crops are collected per track before the cropper selects one for dispatch.
 
 #### vlm_frame_cropper_request_package
 
@@ -539,17 +586,34 @@ Package fields:
 - `vlm_frame_cropper_layer_image`: cropped object image used for semantic analysis.
 - `vlm_frame_cropper_layer_bbox`: object crop bounds associated with the crop image.
 
+#### vlm_dispatch_package
+
+Produces:
+
+- `vlm_dispatch_package`
+
+Package fields:
+
+- `vlm_dispatch_track_id`: track identifier chosen for VLM dispatch.
+- `vlm_dispatch_mode`: whether this is the initial, retry, or final best-available dispatch.
+- `vlm_dispatch_reason`: reason the cropper decided to dispatch now.
+- `vlm_dispatch_cached_crop_count`: number of candidate crops considered when dispatching.
+- `vlm_frame_cropper_layer_package`: the selected crop package forwarded to the VLM layer.
+
 #### vlm_frame_cropper_node
 
 Purpose:
 
 - Create an object-level crop for semantic analysis.
+- Maintain the local crop cache and pick the one crop that should actually be sent to VLM.
 
 Internal functions:
 
 - `resolve_source_frame`: retrieve the source frame associated with the crop request.
 - `crop_object_from_frame`: extract the object image using the requested bounding box.
 - `validate_crop_result`: check that the crop is usable before VLM inference.
+- `score_vlm_crop_candidate`: rank cached crops using detector confidence, crop area, and recency.
+- `select_best_vlm_crop_candidate`: choose the current best crop from the local cache.
 
 Interacts with:
 
@@ -575,6 +639,7 @@ Public functions:
 - `run_vlm_inference`: perform semantic inference on the object crop.
 - `normalize_vlm_result`: convert raw model output into the standard VLM format.
 - `build_vlm_layer_package`: create the VLM result package for downstream layers.
+- `build_vlm_ack_package`: create the acknowledgement package sent back to the cropper and vehicle-state layers after reviewing one dispatched crop.
 
 Suggested external packages:
 
@@ -587,6 +652,7 @@ Config parameters used:
 
 - `config_vlm_enabled`: controls whether the VLM layer is active.
 - `config_vlm_model`: selects the VLM model loaded by the layer.
+- `config_vlm_crop_feedback_enabled`: controls whether the VLM result may request a new crop round or whether the first dispatched crop must be accepted as final for that track.
 - `config_device`: selects the execution target for VLM inference.
 
 #### vlm_layer_package
@@ -604,9 +670,28 @@ Package fields:
 - `vlm_layer_confidence`: confidence or certainty score for the semantic result.
 - `vlm_layer_model_id`: identifier for the VLM model used for inference.
 
+#### vlm_ack_package
+
+Produces:
+
+- `vlm_ack_package`
+
+Package fields:
+
+- `vlm_ack_track_id`: track identifier that the acknowledgement applies to.
+- `vlm_ack_status`: acknowledgement decision, such as `accepted`, `retry_requested`, or `finalize_with_current`.
+- `vlm_ack_reason`: short reason explaining the acknowledgement decision.
+- `vlm_ack_retry_requested`: whether the cropper should reopen candidate selection for this track.
+
+Recommended retry-reason vocabulary for `vlm_ack_reason` or the VLM-side `retry_reasons` field:
+
+- `occluded`
+- `bad_angle`
+
 Ownership:
 
 - `vlm_layer` owns semantic inference output for the current query.
+- `vlm_layer` owns the acknowledgement decision about whether the current crop is usable.
 - `vlm_layer` does not own persistent object state.
 
 #### vlm_inference_node
@@ -620,6 +705,11 @@ Internal functions:
 - `prepare_vlm_prompt`: prepare the semantic query or prompt for inference.
 - `infer_vlm_semantics`: run model inference on the crop image.
 - `parse_vlm_response`: extract structured semantic fields from the model response.
+
+Expected `vehicle_semantics_v1` behavior:
+
+- when the image is good enough, VLM should return structured semantic JSON and `ack_status=accepted`
+- when the image is not good enough, VLM should return `ack_status=retry_requested` plus one or more retry reasons such as `occluded` or `bad_angle`
 
 Interacts with:
 
@@ -874,7 +964,18 @@ Important note:
 
 ### Optional Object Enrichment Path
 
-`tracking_layer_package -> vlm_frame_cropper_request_package -> vlm_frame_cropper_layer_package -> vlm_layer_package -> vehicle_state_layer_package -> metadata_output_layer_package`
+`tracking_layer_package -> vlm_frame_cropper_request_package -> vlm_frame_cropper_layer_package -> vlm_dispatch_package -> vlm_layer_package -> vehicle_state_layer_package -> metadata_output_layer_package`
+
+### Optional VLM Ack Feedback Path
+
+`vlm_ack_package -> vlm_frame_cropper_layer + vehicle_state_layer`
+
+When `config_vlm_crop_feedback_enabled` is `false`:
+
+- cropper still waits for one full cache round
+- one best crop is dispatched once
+- VLM returns structured JSON classification
+- that track is marked progressed and no longer re-enters cropper or VLM, although tracking may continue updating it
 
 ### Optional Scene Path
 
@@ -906,6 +1007,7 @@ Important note:
 ### vlm_layer owns
 
 - semantic inference output for the current query
+- acknowledgement of whether the current crop is accepted, needs retry, or must be finalized with the current best crop
 
 ### metadata_output_layer owns
 

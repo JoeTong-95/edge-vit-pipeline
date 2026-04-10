@@ -21,3 +21,8 @@
 - Updated `plot_evaluation_results.py` to use a true legend-style annotation instead of footer text and increased exported summary plot resolution to 300 DPI.
 - Added `README.md` for the tracking layer covering the public API, config-driven visualizer, automated evaluation sweep, SQLite output, and summary plotting workflow.
 - Updated `visualize_tracking.py` and `automated_evaluation.py` to route frame ingestion through the real `input_layer`, so both video and camera sources are packetized as `input_layer_package` and resized to `config_frame_resolution` before YOLO and tracking.
+- Updated `visualize_tracking.py` so annotated video export is opt-in via `--output` instead of auto-writing into `data/` on every run.
+
+## 2026-04-09
+
+- Updated `README.md` to remove hard-coded absolute output paths in prose, and to reference `visualize_vlm.py` as a consumer of the tracking API.

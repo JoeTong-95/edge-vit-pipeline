@@ -23,6 +23,8 @@ from typing import Any
 
 import numpy as np
 
+ROI_CANDIDATE_IOU_DUPLICATE_THRESHOLD = 0.5
+
 
 _state = {
     "initialized": False,
@@ -63,7 +65,9 @@ def update_roi_state(
     Update ROI discovery state during startup.
 
     The ROI is collected from early-frame vehicle detections and locks once the
-    configured count threshold is reached.
+    configured count threshold is reached. Repeated detections of the same
+    startup vehicle are deduplicated locally inside this layer so the threshold
+    behaves more like a unique-ish vehicle count than a raw frame count.
     """
     _assert_initialized()
     _validate_input_layer_package(input_layer_package)
@@ -150,10 +154,12 @@ def pass_through_full_frame(frame_image: np.ndarray) -> np.ndarray:
 def collect_roi_candidate_boxes(
     yolo_layer_detections: list[dict[str, Any]],
 ) -> None:
-    """Store candidate vehicle detections during startup."""
+    """Store unique-ish candidate vehicle detections during startup."""
     for detection in yolo_layer_detections:
-        bbox = detection["yolo_detection_bbox"]
-        _state["roi_candidate_boxes"].append(tuple(float(value) for value in bbox))
+        bbox = tuple(float(value) for value in detection["yolo_detection_bbox"])
+        if _is_duplicate_candidate_box(bbox):
+            continue
+        _state["roi_candidate_boxes"].append(bbox)
 
 
 
@@ -175,6 +181,38 @@ def lock_roi_bounds(roi_bounds: tuple[int, int, int, int]) -> None:
     """Mark ROI discovery as complete and freeze the active ROI."""
     _state["roi_layer_bounds"] = tuple(int(value) for value in roi_bounds)
     _state["roi_layer_locked"] = True
+
+
+def _is_duplicate_candidate_box(
+    candidate_bbox: tuple[float, float, float, float],
+) -> bool:
+    for existing_bbox in _state["roi_candidate_boxes"]:
+        if _bbox_iou(candidate_bbox, existing_bbox) >= ROI_CANDIDATE_IOU_DUPLICATE_THRESHOLD:
+            return True
+    return False
+
+
+def _bbox_iou(
+    bbox_a: tuple[float, float, float, float],
+    bbox_b: tuple[float, float, float, float],
+) -> float:
+    ax1, ay1, ax2, ay2 = bbox_a
+    bx1, by1, bx2, by2 = bbox_b
+    inter_x1 = max(ax1, bx1)
+    inter_y1 = max(ay1, by1)
+    inter_x2 = min(ax2, bx2)
+    inter_y2 = min(ay2, by2)
+    inter_w = max(0.0, inter_x2 - inter_x1)
+    inter_h = max(0.0, inter_y2 - inter_y1)
+    inter_area = inter_w * inter_h
+    if inter_area <= 0.0:
+        return 0.0
+    area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
+    area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+    union_area = area_a + area_b - inter_area
+    if union_area <= 0.0:
+        return 0.0
+    return inter_area / union_area
 
 
 

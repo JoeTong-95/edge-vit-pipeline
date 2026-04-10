@@ -61,6 +61,13 @@ def main() -> None:
     assert state_after_first_detection["roi_layer_locked"] is False
     assert state_after_first_detection["roi_candidate_box_count"] == 1
 
+    state_after_duplicate_detection = update_roi_state(
+        dict_input_package,
+        [_make_detection(12, 16, 52, 72)],
+    )
+    assert state_after_duplicate_detection["roi_layer_locked"] is False
+    assert state_after_duplicate_detection["roi_candidate_box_count"] == 1
+
     state_after_second_detection = update_roi_state(
         dataclass_input_package,
         [_make_detection(20, 10, 80, 90)],

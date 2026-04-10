@@ -145,6 +145,12 @@ huggingface-cli login
 3. Build `vision-jetson:latest` on the Jetson.
 4. Validate YOLO, VLM, GPU, and deployment behavior on the Jetson.
 
+### Visualization and VLM demos on the host
+
+Config-driven helpers (YOLO-only, tracking, ROI, cropper cache, and the end-to-end `src/vlm-layer/visualize_vlm.py` path) read `src/configuration-layer/config.yaml` and are listed in `pipeline/README.md`. Mount this repo into the container the same way you mount it for development so those scripts see `config.yaml`, video paths, and local model weights.
+
+The bundled Qwen3.5 VLM weights require **`transformers` 5.x** (`model_type` `qwen3_5`). The `docker/requirements*.txt` files pin `transformers>=5.0.0,<6.0.0`; upgrade the image or your venv if you still have 4.x installed.
+
 ### Notes
 
 - The repository is mounted from the host, so code changes do not require rebuilding the image.

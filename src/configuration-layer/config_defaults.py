@@ -11,6 +11,8 @@ DEFAULT_CONFIG_VALUES = {
     "config_yolo_confidence_threshold": 0.25,
     "config_vlm_enabled": False,
     "config_vlm_model": "",
+    "config_vlm_crop_feedback_enabled": True,
+    "config_vlm_crop_cache_size": 5,
     "config_scene_awareness_enabled": False,
     "config_metadata_output_enabled": True,
     "config_evaluation_output_enabled": False,
