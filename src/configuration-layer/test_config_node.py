@@ -17,6 +17,7 @@ class ConfigurationLayerTests(unittest.TestCase):
         self.assertEqual(config.config_device, "cpu")
         self.assertEqual(config.config_input_source, "video")
         self.assertEqual(config.config_frame_resolution, (640, 480))
+        self.assertTrue(config.config_vlm_crop_feedback_enabled)
 
     def test_validate_config_accepts_valid_config(self) -> None:
         config = load_config(
@@ -26,6 +27,7 @@ class ConfigurationLayerTests(unittest.TestCase):
                 "config_input_path": None,
                 "config_vlm_enabled": True,
                 "config_vlm_model": "example-vlm",
+                "config_vlm_crop_feedback_enabled": False,
             }
         )
         validate_config(config)

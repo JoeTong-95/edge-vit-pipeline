@@ -4,7 +4,7 @@ This layer owns loading, normalizing, validating, and serving the shared `config
 
 ## Public API
 
-Use [`config_node.py`](/e:/OneDrive/desktop/01_2026_Projects/01_2026_Cornell_26_Spring/MAE_4221_IoT/DesignProject/edge-vlm-pipeline/src/configuration-layer/config_node.py) as the public entry point.
+Use [`config_node.py`](config_node.py) as the public entry point.
 
 Public functions:
 - `load_config`
@@ -13,7 +13,7 @@ Public functions:
 
 ## Main Editable File
 
-Use [`config.yaml`](/e:/OneDrive/desktop/01_2026_Projects/01_2026_Cornell_26_Spring/MAE_4221_IoT/DesignProject/edge-vlm-pipeline/src/configuration-layer/config.yaml) for normal run-to-run changes.
+Use [`config.yaml`](config.yaml) for normal run-to-run changes.
 
 Common fields:
 - `config_input_source`: `video` or `camera`
@@ -22,6 +22,11 @@ Common fields:
 - `config_yolo_model`: bundled model such as `yolov8n.pt`, `yolov10n.pt`, or `yolo11n.pt`
 - `config_yolo_confidence_threshold`: detection confidence threshold
 - `config_frame_resolution`: target frame size metadata
+- `config_vlm_enabled`: run VLM inference paths when true (requires PyTorch, `transformers`, and a valid `config_vlm_model` path)
+- `config_vlm_model`: filesystem path to the VLM weights (repo-relative paths resolve from the repository root, e.g. `src/vlm-layer/Qwen3.5-0.8B`)
+- `config_vlm_crop_feedback_enabled`: when true, VLM may request a better crop round; when false, VLM runs in single-shot mode and the first dispatched image completes that track
+- `config_vlm_crop_cache_size`: number of crops collected in one round before dispatch
+- `config_roi_enabled`, `config_roi_vehicle_count_threshold`, and other keys as listed in `config_schema.py`
 
 ## Typical Startup Flow
 
@@ -45,5 +50,8 @@ model_name = get_config_value(config, "config_yolo_model")
 - `src/yolo-layer/visualize_yolo.py`
 - `src/tracking-layer/visualize_tracking.py`
 - `src/tracking-layer/automated_evaluation.py`
+- `src/roi-layer/visualize_roi.py`
+- `src/vlm-frame-cropper-layer/visualize_vlm_frame_cropper.py`
+- `src/vlm-layer/visualize_vlm.py`
 
 These scripts read from `config.yaml` by default and let CLI arguments override specific values.

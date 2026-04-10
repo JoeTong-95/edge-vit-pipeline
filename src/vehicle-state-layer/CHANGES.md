@@ -12,3 +12,9 @@ Layer changes in this branch
   dataclass produced by the VLM layer, not only dict-style fixtures.
 - Added `test_vehicle_state_layer.py` coverage for tracking updates, VLM merges,
   stale-record pruning, and VLM dataclass compatibility.
+- Added VLM acknowledgement tracking fields and `update_vehicle_state_from_vlm_ack` so retry/finalize decisions are persisted per track.
+
+## 2026-04-09
+
+- Updated `README.md` to reference `visualize_vlm.py` as an integration exercise for tracking + VLM ack + enrichment updates.
+

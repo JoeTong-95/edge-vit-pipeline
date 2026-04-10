@@ -12,3 +12,9 @@ Layer changes in this branch
   ROI lock, cropped output, and dataclass-package compatibility.
 - Added `visualize_roi.py` to render ROI discovery, ROI lock state, and a live
   side-by-side view of the full frame and active ROI crop.
+- Updated `visualize_roi.py` so it only writes a video when `--output` is provided, instead of auto-saving into `data/` on every run.
+
+## 2026-04-09
+
+- Updated `README.md` with `visualize_roi.py` quick start and a pointer to `pipeline/README.md` for the full helper list.
+- Changed ROI discovery counting so overlapping repeat detections are deduplicated inside the ROI layer before thresholding; this makes `config_roi_vehicle_count_threshold` behave closer to a unique startup-vehicle count.

@@ -1,9 +1,10 @@
 chat-history/
 
 # Model weights and checkpoints
-*.pt
-*.pth
-*.ckpt
+#*.pt
+#*.pth
+#*.ckpt
 *.onnx
 *.engine
 *.bin
+data/*.mp4

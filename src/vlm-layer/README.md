@@ -1,6 +1,6 @@
 # VLM Layer
 
-This folder implements the first working version of the `vlm_layer` described in [pipeline_layers_and_interactions.md](E:\OneDrive\desktop\01_2026_Projects\01_2026_Cornell_26_Spring\MAE_4221_IoT\DesignProject\edge-vlm-pipeline\pipeline\pipeline_layers_and_interactions.md).
+This folder implements the working `vlm_layer` described in [`../../pipeline/pipeline_layers_and_interactions.md`](../../pipeline/pipeline_layers_and_interactions.md).
 
 ## Purpose
 
@@ -38,6 +38,11 @@ Those responsibilities stay with the tracking, vehicle state, and metadata layer
 - `run-smoke-test.bat`
   - one-click Windows launcher for the smoke test
 
+- `visualize_vlm.py`
+  - orchestration helper (not a replacement for the layer contract): reads `src/configuration-layer/config.yaml`, runs input → YOLO → tracking → cropper cache/dispatch → `run_vlm_inference`, then `register_vlm_ack_package` and vehicle-state ack updates
+  - three-column output: raw frame + tracks, cropper cache and selected crop, and a scrollable log of dispatch mode/reason, user prompt, chat-template preview (`preview_vlm_applied_prompt`), model response, and ack status
+  - options include `--show`, `--output`, `--retry-on-unknown`, `--demo-first-retry`, `--vlm-device`
+
 - `truckimage.png`
   - sample image used for the layer smoke test
 
@@ -58,6 +63,11 @@ The layer exposes the required public functions from the pipeline contract:
 - `run_vlm_inference`
 - `normalize_vlm_result`
 - `build_vlm_layer_package`
+- `build_vlm_ack_package`
+
+Additional helper used by `visualize_vlm.py` and debugging:
+
+- `preview_vlm_applied_prompt` — returns the processor chat-template string for a given user prompt (same shape as inference).
 
 It also includes the internal node-level helpers named in the pipeline document:
 
@@ -92,6 +102,13 @@ The implementation defines explicit Python dataclasses for the key package contr
     - `vlm_layer_attributes`
     - `vlm_layer_confidence`
     - `vlm_layer_model_id`
+
+- `VLMAckPackage`
+  - includes:
+    - `vlm_ack_track_id`
+    - `vlm_ack_status`
+    - `vlm_ack_reason`
+    - `vlm_ack_retry_requested`
 
 ## Default Query Type
 
@@ -132,9 +149,20 @@ python smoke_test.py --disabled
 
 The smoke test does not depend on the upstream cropper layer. It builds a burner cropper package locally from `truckimage.png` so you can verify this layer in isolation.
 
+## End-to-end visualizer
+
+From the repo root (requires the same runtime as smoke inference: PyTorch, `transformers`, local model path in `config.yaml`):
+
+```powershell
+python src/vlm-layer/visualize_vlm.py --show
+python src/vlm-layer/visualize_vlm_realtime.py --show
+python src/vlm-layer/visualize_vlm.py --output data/vlm_visualization.mp4
+python src/vlm-layer/visualize_vlm_realtime.py --show --max-queue-size 128
+```
+
 ## Runtime Requirements
 
-I double-checked the repo requirements in [requirements.txt](E:\OneDrive\desktop\01_2026_Projects\01_2026_Cornell_26_Spring\MAE_4221_IoT\DesignProject\edge-vlm-pipeline\docker\requirements.txt).
+The shared dependency list is in [`../../docker/requirements.txt`](../../docker/requirements.txt).
 
 The current requirement file already includes the main libraries this layer needs:
 
@@ -149,16 +177,47 @@ However, actual inference also requires:
 
 - `torch`
 
-`torch` is not currently listed in the docker requirements file, so the layer code assumes PyTorch is available in the runtime environment.
+The bundled **Qwen3.5** checkpoint (`model_type` **`qwen3_5`**) requires **`transformers` 5.x** (4.x does not register that architecture). Use `pip install -U "transformers>=5.0.0,<6.0.0"` if you see errors mentioning `qwen3_5` or an unrecognized model architecture.
 
-## Current Scope
+`torch` is not listed in `docker/requirements.txt`; the layer assumes PyTorch is available in the runtime environment.
 
-This implementation is intentionally limited to the `vlm_layer` folder, following [codex_ground_rules.md](E:\OneDrive\desktop\01_2026_Projects\01_2026_Cornell_26_Spring\MAE_4221_IoT\DesignProject\edge-vlm-pipeline\pipeline\codex_ground_rules.md).
+## Scope and orchestration
 
-That means:
+Core inference and packages live in this folder per [`../../pipeline/codex_ground_rules.md`](../../pipeline/codex_ground_rules.md). `visualize_vlm.py` is documented as a **cross-layer helper** (same category as other `visualize_*.py` scripts in `pipeline/README.md`): it calls neighboring layer APIs to demonstrate collect → dispatch → infer → ack without changing their contracts.
 
-- this layer now has a real implementation
-- upstream cropper integration is still not implemented outside this folder
-- downstream vehicle state and metadata integration are still not implemented outside this folder
 
-Those integrations can be added later once the neighboring layers are ready.
+## Ack Loop Role
+
+The VLM layer now also returns a lightweight acknowledgement package after one dispatched crop is reviewed. That acknowledgement lets the cropper and vehicle-state layers distinguish between:
+
+- `accepted`: the selected crop is usable and the track is finalized
+- `retry_requested`: the current crop is not good enough and the cropper may reopen selection if the track is still visible
+- `finalize_with_current`: the object has left scope and downstream logic should work with the best crop already available
+
+
+## Visual Loop Debugging
+
+`visualize_vlm.py` now focuses on the actual decision loop for one track at a time:
+
+- current selected crop
+- last image sent to VLM
+- VLM judgement and ack
+- whether metadata was accepted or the cropper is refilling a new round
+- whether a lost object forces VLM to keep using the previous sent image
+
+`visualize_vlm_realtime.py` keeps the input feed moving at source FPS while VLM inference runs on a background worker thread. Use it to see whether the queue/backlog stays under control in a more camera-like setting.
+
+
+## Retry Reasons
+
+The VLM layer now decides whether the image is good enough by returning structured JSON in `vehicle_semantics_v1`.
+
+Expected behavior:
+
+- if usable: return semantic JSON and `ack_status=accepted`
+- if not usable: return `ack_status=retry_requested` plus one or more retry reasons from `occluded` or `bad_angle`
+
+The visualizer shows those retry reasons directly, and only writes metadata after an accepted response.
+
+
+When `config_vlm_crop_feedback_enabled` is `false`, `visualize_vlm.py` runs VLM in single-shot mode: one full crop round, one dispatch, one JSON classification, then the track is marked progressed and skipped by cropper/VLM on future frames.

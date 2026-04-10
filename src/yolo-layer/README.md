@@ -50,3 +50,4 @@ If `--save-metrics` is enabled, the script stores run metadata and frame-level m
 - Bundled local weights are preferred before Ultralytics falls back to external lookup.
 - `cuda` only works if the active Python environment has CUDA-enabled PyTorch.
 - The visualizer writes an annotated MP4 by default and can also show a live preview window.
+- `src/vlm-layer/visualize_vlm.py` reuses `detector.py` for the same YOLO path inside an end-to-end VLM demo (`pipeline/README.md`).

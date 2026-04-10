@@ -49,7 +49,7 @@ Current sweep combinations:
 - model family: `v8`, `v10`, `v11`
 - mode: detection only, tracking enabled
 
-Outputs are saved by default to `E:\OneDrive\desktop\video`:
+Outputs are saved by default to a configurable directory (see `automated_evaluation.py` defaults; override with CLI flags):
 - one MP4 per run, such as `eval_v8_cuda_tracking.mp4`
 - one SQLite database with run-level and frame-level metrics
 
@@ -61,10 +61,11 @@ After the sweep, generate a summary plot with:
 python .\plot_evaluation_results.py
 ```
 
-The plot utility reads the newest `tracking_eval_metrics*.sqlite` file in `E:\OneDrive\desktop\video` by default and saves a styled PNG summary next to it.
+The plot utility reads the newest `tracking_eval_metrics*.sqlite` file from the evaluator output directory by default and saves a styled PNG summary next to it.
 
 ## Notes
 
 - The tracking visualizer HUD shows mode, end-to-end FPS, inference-only FPS, and track counts.
 - SQLite logging is built into both the visualizer and automated evaluator.
 - The evaluator handles older SQLite schemas and falls back to a new DB file if the default one is still locked by an older run.
+- The end-to-end VLM demo `src/vlm-layer/visualize_vlm.py` also consumes this layer’s package shape via the shared `tracker.py` API (see `pipeline/README.md` for helper scope).
