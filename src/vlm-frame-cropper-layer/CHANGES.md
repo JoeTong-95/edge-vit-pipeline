@@ -30,3 +30,18 @@ Layer changes in this branch
 
 - Changed the crop cache from score-retained top-K storage back to a rolling sequence cache, so `config_vlm_crop_cache_size` now means the current round size rather than the best N seen so far.
 - Tightened the retry loop so first dispatch only happens after a full round, retry clears the previous round, and a lost object after retry forces VLM to use the previous sent image instead of receiving a new late crop.
+
+## 2026-04-10
+
+- Added `config_vlm_dead_after_lost_frames` support to the crop cache state so a
+  track can become terminal `dead` after a configurable consecutive-lost streak.
+- Added dead-track partial dispatch behavior: if the first cache round never
+  reaches `config_vlm_crop_cache_size`, the cropper now still sends the best
+  available crop once the track is dead.
+- Added local terminal states `collecting`, `dead`, and `done` for cropper-side
+  visualization and downstream orchestration.
+- Updated the cropper visualizer so dead and done tracks render with explicit
+  statuses instead of only `new`/`active`/`lost`.
+- Split VLM rejection from cropper death: the visualizer and local terminal
+  state now show `no` for VLM label rejection, while `dead` remains the
+  lost-threshold path.

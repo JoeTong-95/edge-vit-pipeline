@@ -74,6 +74,7 @@ ACCENT = (80, 210, 255)
 GOOD = (70, 210, 110)
 WARN = (0, 190, 255)
 BAD = (70, 90, 255)
+NO_COLOR = (180, 180, 180)
 STATUS_COLORS = {"new": (60, 230, 90), "active": (255, 180, 0), "lost": (40, 80, 255)}
 MAX_JSON_CHARS = 440
 
@@ -114,6 +115,7 @@ def load_runtime_settings() -> dict[str, Any]:
         "vlm_model": _resolve_vlm_model_path(get_config_value(config, "config_vlm_model")),
         "vlm_crop_feedback_enabled": get_config_value(config, "config_vlm_crop_feedback_enabled"),
         "vlm_crop_cache_size": get_config_value(config, "config_vlm_crop_cache_size"),
+        "vlm_dead_after_lost_frames": get_config_value(config, "config_vlm_dead_after_lost_frames"),
         "output": "",
     }
 
@@ -248,12 +250,40 @@ def pick_focus_track(crop_cache_state: dict[str, Any], dispatch_track_ids: list[
 def derive_loop_state(track_cache: dict[str, Any], vehicle_record: dict[str, Any] | None) -> tuple[str, tuple[int, int, int], list[str]]:
     cache_count = len(track_cache['cached_crops'])
     if vehicle_record and vehicle_record.get('vehicle_state_layer_vlm_called'):
+        terminal_status = vehicle_record.get('vehicle_state_layer_terminal_status', 'done')
+        if terminal_status == 'no':
+            return (
+                'NO',
+                NO_COLOR,
+                [
+                    'VLM rejected this track as not one of the flagged detector labels.',
+                    'This track is terminal for the VLM path.',
+                ],
+            )
+        if terminal_status == 'dead':
+            return (
+                'DEAD',
+                BAD,
+                [
+                    'This track reached a terminal dead state.',
+                    'It aged out on the lost-threshold path and was finalized.',
+                ],
+            )
         return (
-            'PROGRESSED TO METADATA',
+            'DONE',
             GOOD,
             [
                 'This track already has an accepted VLM result.',
                 'Tracking can continue, but cropper and VLM are skipped for this truck.',
+            ],
+        )
+    if track_cache.get('vlm_dead') and track_cache['vlm_sent_count'] == 0:
+        return (
+            'DEAD WAITING FOR FINAL SEND',
+            BAD,
+            [
+                'This track was lost for too many consecutive frames.',
+                'Cropper will send the best available partial cache instead of waiting for a full round.',
             ],
         )
     if track_cache['vlm_previous_sent_must_be_used']:
@@ -317,15 +347,21 @@ def build_right_panel(panel_h: int, panel_w: int, focus_track_id: str | None, cr
 
     ack_status = debug.get('ack_status', track_cache.get('vlm_ack_status', 'not_requested'))
     reasons = debug.get('retry_reasons', [])
-    note = debug.get('image_quality_notes', '') or track_cache.get('vlm_ack_reason', '')
     summary_y = 176
     cv2.rectangle(panel, (14, summary_y), (panel_w - 14, summary_y + 72), CARD_BG, -1)
     draw_text(panel, 'Latest VLM reply', 22, summary_y + 22, scale=0.40)
     if ack_status == 'retry_requested':
-        reason_text = ', '.join(reasons) if reasons else (note or 'occluded')
-        draw_text_block(panel, [f'ack=retry_requested', f'reasons: {reason_text}', note or 'VLM needs a better image.'], (24, summary_y + 46), color=WARN, scale=0.31, line_gap=16)
+        reason_text = ', '.join(reasons) if reasons else 'occluded'
+        draw_text_block(panel, [f'ack=retry_requested', f'reasons: {reason_text}', 'VLM needs a better image.'], (24, summary_y + 46), color=WARN, scale=0.31, line_gap=16)
     elif debug.get('normalized_result') is not None:
-        draw_text_block(panel, [f'ack=accepted', 'JSON is clear enough for metadata output.'], (24, summary_y + 46), color=GOOD, scale=0.31, line_gap=16)
+        accepted_lines = ['ack=accepted']
+        accepted_color = GOOD
+        if debug['normalized_result'].get('is_truck') is False:
+            accepted_lines.append('VLM rejected this track as not one of the flagged labels.')
+            accepted_color = NO_COLOR
+        else:
+            accepted_lines.append('JSON is clear enough for metadata output.')
+        draw_text_block(panel, accepted_lines, (24, summary_y + 46), color=accepted_color, scale=0.31, line_gap=16)
     else:
         draw_text_block(panel, ['No VLM reply yet for this track.'], (24, summary_y + 46), color=MUTED, scale=0.31, line_gap=16)
 
@@ -370,18 +406,21 @@ def build_right_panel(panel_h: int, panel_w: int, focus_track_id: str | None, cr
     normalized = debug.get('normalized_result')
     if ack_status == 'retry_requested':
         reason_text = ', '.join(reasons) if reasons else track_cache.get('vlm_ack_reason', 'occluded')
-        judge_lines = [f'ack=retry_requested', f'reasons: {reason_text}', debug.get('image_quality_notes', '') or 'VLM wants a better image.']
+        judge_lines = [f'ack=retry_requested', f'reasons: {reason_text}', 'VLM wants a better image.']
         draw_text_block(panel, judge_lines, (24, judge_y + 50), color=WARN, scale=0.31, line_gap=16)
     elif normalized:
-        draw_text_block(panel, ['ack=accepted', 'JSON classification:'], (24, judge_y + 46), color=GOOD, scale=0.31, line_gap=16)
-        json_lines = pretty_json_snippet({
-            'is_truck': normalized.get('is_truck'),
-            'truck_type': normalized.get('truck_type'),
-            'wheel_count': normalized.get('wheel_count'),
-            'estimated_weight_kg': normalized.get('estimated_weight_kg'),
-            'confidence': normalized.get('vlm_layer_confidence'),
-        })
-        draw_text_block(panel, json_lines, (28, judge_y + 82), scale=0.26, line_gap=14)
+        if normalized.get('is_truck') is False:
+            draw_text_block(panel, ['ack=accepted', 'Rejected label result:', 'no'], (24, judge_y + 46), color=NO_COLOR, scale=0.31, line_gap=16)
+        else:
+            draw_text_block(panel, ['ack=accepted', 'JSON classification:'], (24, judge_y + 46), color=GOOD, scale=0.31, line_gap=16)
+            json_lines = pretty_json_snippet({
+                'is_truck': normalized.get('is_truck'),
+                'wheel_count': normalized.get('wheel_count'),
+                'estimated_weight_kg': normalized.get('estimated_weight_kg'),
+                'ack_status': normalized.get('vlm_ack_status'),
+                'retry_reasons': normalized.get('vlm_retry_reasons'),
+            })
+            draw_text_block(panel, json_lines, (28, judge_y + 82), scale=0.26, line_gap=14)
     else:
         draw_text_block(panel, ['No VLM response yet.'], (24, judge_y + 52), color=MUTED, scale=0.31, line_gap=16)
 
@@ -393,7 +432,7 @@ def build_right_panel(panel_h: int, panel_w: int, focus_track_id: str | None, cr
         tag_text = ', '.join(f'{k}={v}' for k, v in list(tags.items())[:4]) or 'none'
         meta_lines = [
             f"is_truck={vehicle_record.get('vehicle_state_layer_semantic_tags', {}).get('is_truck', 'unknown')}",
-            f"truck_type={vehicle_record.get('vehicle_state_layer_truck_type', 'unknown')}",
+            f"terminal={vehicle_record.get('vehicle_state_layer_terminal_status', 'tracking')}",
             f"vlm_called={vehicle_record.get('vehicle_state_layer_vlm_called')}",
             f"ack_status={vehicle_record.get('vehicle_state_layer_vlm_ack_status')}",
             f'tags: {tag_text}',
@@ -414,8 +453,14 @@ def build_canvas(frame_view: np.ndarray, tracking_pkg: dict[str, Any], focus_tra
         x1, y1, x2, y2 = [int(v * DISPLAY_SCALE) for v in row['bbox']]
         state_record = get_vehicle_state_record(row['track_id'])
         progressed_only_tracking = bool(state_record and state_record.get('vehicle_state_layer_vlm_called'))
-        display_status = 'done' if progressed_only_tracking else row['status']
-        color = GOOD if progressed_only_tracking else STATUS_COLORS.get(row['status'], (220, 220, 220))
+        if progressed_only_tracking:
+            terminal_status = state_record.get('vehicle_state_layer_terminal_status', 'done')
+            display_status = terminal_status
+            color = BAD if terminal_status == 'dead' else (NO_COLOR if terminal_status == 'no' else GOOD)
+        else:
+            track_cache = crop_cache_state['track_caches'].get(str(row['track_id']))
+            display_status = 'dead' if track_cache and track_cache.get('vlm_dead') else row['status']
+            color = BAD if display_status == 'dead' else STATUS_COLORS.get(row['status'], (220, 220, 220))
         thickness = 2
         if focus_track_id is not None and row['track_id'] == focus_track_id and not progressed_only_tracking:
             color = ACCENT
@@ -465,7 +510,7 @@ def main() -> None:
     input_layer.initialize_input_layer(config_input_source=args.input_source, config_frame_resolution=frame_resolution, config_input_path=args.video, camera_device_index=args.camera_index, use_gstreamer=args.gstreamer)
     initialize_yolo_layer(model_name=args.model, conf_threshold=args.conf, device=args.device)
     initialize_tracking_layer(frame_rate=int(fps))
-    crop_cache_state = initialize_vlm_crop_cache(defaults['vlm_crop_cache_size'])
+    crop_cache_state = initialize_vlm_crop_cache(defaults['vlm_crop_cache_size'], defaults['vlm_dead_after_lost_frames'])
     initialize_vehicle_state_layer(prune_after_lost_frames=None)
     debug_state: dict[str, dict[str, Any]] = {}
     start_time = time.time()
@@ -516,9 +561,11 @@ def main() -> None:
                     prompt_text = prepare_vlm_prompt(DEFAULT_VLM_QUERY_TYPE, vlm_crop_pkg)
                     try:
                         query_type = DEFAULT_VLM_QUERY_TYPE if defaults['vlm_crop_feedback_enabled'] else 'vehicle_semantics_single_shot_v1'
+                        if dispatch['vlm_dispatch_mode'] == 'dead_best_available':
+                            query_type = 'vehicle_semantics_single_shot_v1'
                         raw_result = run_vlm_inference(vlm_state, vlm_crop_pkg, query_type)
                         normalized = normalize_vlm_result(raw_result)
-                        ack = build_vlm_ack_package_from_result(raw_result) if defaults['vlm_crop_feedback_enabled'] else build_vlm_ack_package(str(tid), 'accepted', 'feedback_disabled_single_shot', False)
+                        ack = build_vlm_ack_package_from_result(raw_result) if defaults['vlm_crop_feedback_enabled'] or query_type == 'vehicle_semantics_single_shot_v1' else build_vlm_ack_package(str(tid), 'accepted', 'feedback_disabled_single_shot', False)
                         register_vlm_ack_package(crop_cache_state, ack)
                         update_vehicle_state_from_vlm_ack(ack)
                         if ack.vlm_ack_status == 'accepted':
@@ -530,7 +577,6 @@ def main() -> None:
                             'ack_status': ack.vlm_ack_status,
                             'ack_reason': ack.vlm_ack_reason,
                             'retry_reasons': normalized.get('vlm_retry_reasons', []) if defaults['vlm_crop_feedback_enabled'] else [],
-                            'image_quality_notes': normalized.get('vlm_image_quality_notes', '') if defaults['vlm_crop_feedback_enabled'] else 'feedback loop disabled; first dispatch is final',
                             'progressed_only_tracking': ack.vlm_ack_status == 'accepted',
                         }
                     except Exception as exc:
@@ -544,7 +590,6 @@ def main() -> None:
                             'ack_status': 'retry_requested',
                             'ack_reason': f'VLM error: {exc}',
                             'retry_reasons': ['occluded'],
-                            'image_quality_notes': f'VLM error: {exc}',
                         }
 
             focus_track_id = pick_focus_track(crop_cache_state, dispatch_track_ids)

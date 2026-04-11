@@ -31,6 +31,7 @@ _state = {
     "conf_threshold": None,
     "target_class_ids": None,
     "device": None,
+    "default_imgsz": None,
     "initialized": False,
 }
 
@@ -65,6 +66,7 @@ def initialize_yolo_layer(model_name="yolov8n.pt", conf_threshold=0.25, device="
     _state["conf_threshold"] = conf_threshold
     _state["target_class_ids"] = set(TARGET_CLASSES.keys())
     _state["device"] = device
+    _state["default_imgsz"] = _state["model"].overrides.get("imgsz")
     _state["initialized"] = True
 
     print(f"[yolo_layer] Loaded model: {resolved_model_name}")
@@ -101,12 +103,19 @@ def run_yolo_detection(upstream_package):
         raise ValueError("Upstream package has no image field "
                          "(expected roi_layer_image or input_layer_image).")
 
-    results = _state["model"](
-        image,
-        conf=_state["conf_threshold"],
-        device=_state["device"],
-        verbose=False,
-    )
+    model_kwargs = {
+        "conf": _state["conf_threshold"],
+        "device": _state["device"],
+        "verbose": False,
+    }
+
+    roi_enabled = bool(upstream_package.get("roi_layer_enabled", False))
+    roi_locked = bool(upstream_package.get("roi_layer_locked", False))
+    force_native_imgsz = bool(upstream_package.get("yolo_force_native_imgsz", False))
+    if force_native_imgsz or ("roi_layer_image" in upstream_package and roi_enabled and roi_locked):
+        model_kwargs["imgsz"] = _resolve_dynamic_roi_imgsz(image)
+
+    results = _state["model"](image, **model_kwargs)
 
     result = results[0]
 
@@ -233,3 +242,25 @@ def _resolve_model_path(model_name):
             return str(bundled_pt_candidate)
 
     return model_name
+
+
+def _resolve_dynamic_roi_imgsz(image):
+    """
+    Use the actual ROI crop shape for inference once ROI is active.
+
+    This prevents ROI inputs from being silently expanded back to the model's
+    default square inference size, which would otherwise erase much of the
+    expected performance benefit of cropping.
+    """
+    image_height, image_width = image.shape[:2]
+    return (
+        _round_up_to_stride(int(image_height)),
+        _round_up_to_stride(int(image_width)),
+    )
+
+
+def _round_up_to_stride(value, stride=32):
+    """Round positive sizes up to the model-friendly stride multiple."""
+    if value <= 0:
+        return stride
+    return ((int(value) + stride - 1) // stride) * stride
