@@ -245,7 +245,7 @@ def main() -> None:
     )
     initialize_yolo_layer(model_name=args.model, conf_threshold=args.conf, device=args.device)
     initialize_tracking_layer(frame_rate=int(fps))
-    crop_cache_state = initialize_vlm_crop_cache(defaults["vlm_crop_cache_size"])
+    crop_cache_state = initialize_vlm_crop_cache(defaults["vlm_crop_cache_size"], defaults["vlm_dead_after_lost_frames"])
     initialize_vehicle_state_layer(prune_after_lost_frames=None)
     worker = AsyncVLMWorker(vlm_state=vlm_state, feedback_enabled=bool(defaults["vlm_crop_feedback_enabled"]), max_queue_size=args.max_queue_size)
     worker.start()
@@ -268,7 +268,6 @@ def main() -> None:
                     "ack_status": ack.vlm_ack_status,
                     "ack_reason": ack.vlm_ack_reason,
                     "retry_reasons": (result["normalized_result"] or {}).get("vlm_retry_reasons", []) if defaults["vlm_crop_feedback_enabled"] else [],
-                    "image_quality_notes": (result["normalized_result"] or {}).get("vlm_image_quality_notes", "") if defaults["vlm_crop_feedback_enabled"] else "feedback loop disabled; first dispatch is final",
                     "progressed_only_tracking": ack.vlm_ack_status == "accepted",
                     "runtime_sec": result["runtime_sec"],
                     "dispatch_frame_id": result["dispatch_frame_id"],
@@ -330,6 +329,8 @@ def main() -> None:
                         vlm_frame_cropper_layer_bbox=tuple(int(x) for x in inner["vlm_frame_cropper_layer_bbox"]),
                     )
                     query_type = DEFAULT_VLM_QUERY_TYPE if defaults["vlm_crop_feedback_enabled"] else "vehicle_semantics_single_shot_v1"
+                    if dispatch["vlm_dispatch_mode"] == "dead_best_available":
+                        query_type = "vehicle_semantics_single_shot_v1"
                     worker.submit(
                         {
                             "track_id": str(tid),

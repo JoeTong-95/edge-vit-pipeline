@@ -1,5 +1,13 @@
 # Configuration Layer Changes
 
+## 2026-04-10
+
+- Added `config_vlm_dead_after_lost_frames` to the shared configuration contract so the cropper can declare a track dead after a configurable number of consecutive `lost` tracking updates.
+- Updated `config_defaults.py`, `config_schema.py`, `config_types.py`, and `config_normalizer.py` so the new dead-threshold setting is normalized and carried like the rest of the pipeline config.
+- Updated `config_validator.py` so `config_vlm_dead_after_lost_frames` must be greater than 0.
+- Updated `config.yaml` to expose the dead-threshold control for the cropper and VLM visualizers.
+- Updated `README.md` to document the new dead-threshold setting and how it affects partial-cache finalization.
+
 ## 2026-04-08
 
 - Updated `config.yaml` to point to the existing `data/sample.mp4` file instead of the missing `data/sample1.mp4`.

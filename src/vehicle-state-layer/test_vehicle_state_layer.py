@@ -52,6 +52,7 @@ def main() -> None:
     update_vehicle_state_from_vlm(vlm_package)
     record_101 = get_vehicle_state_record(101)
     assert record_101['vehicle_state_layer_vlm_ack_status'] == 'accepted'
+    assert record_101['vehicle_state_layer_terminal_status'] == 'done'
 
     update_vehicle_state_from_vlm_ack(build_vlm_ack_package('101', 'finalize_with_current', 'truck_left_scene', False))
     record_101 = get_vehicle_state_record(101)
@@ -61,9 +62,20 @@ def main() -> None:
     update_vehicle_state_from_tracking(_make_tracking_package(4, [101, 202], ['truck', 'bus'], ['active', 'lost']))
     assert get_vehicle_state_record(202) is None
 
+    update_vehicle_state_from_tracking(_make_tracking_package(5, [303], ['truck'], ['new']))
+    not_truck_package = build_vlm_layer_package(VLMRawResult(
+        vlm_layer_track_id='303',
+        vlm_layer_query_type='vehicle_semantics_single_shot_v1',
+        vlm_layer_model_id='test-model',
+        vlm_layer_raw_text='{"is_truck": false, "truck_type": "unknown", "confidence": 0.91}',
+    ))
+    update_vehicle_state_from_vlm(not_truck_package)
+    record_303 = get_vehicle_state_record(303)
+    assert record_303['vehicle_state_layer_terminal_status'] == 'no'
+    assert record_303['vehicle_state_layer_truck_type'] == 'unknown'
+
     output_package = build_vehicle_state_layer_package()
-    assert output_package['vehicle_state_layer_vlm_ack_status'] == ['finalize_with_current']
-    assert output_package['vehicle_state_layer_vlm_final_candidate_sent'] == [True]
+    assert output_package['vehicle_state_layer_terminal_status'] == ['done', 'no']
     print('vehicle_state_layer tests passed')
 
 

@@ -12,7 +12,7 @@ Or from project root:
 
 This verifies:
   - YOLO model loads correctly
-  - detections are filtered to target classes (truck/car/bus)
+  - detections are filtered to target classes (car/bus/truck)
   - yolo_layer_package format matches the spec
   - confidence threshold is reasonable for your video
 """

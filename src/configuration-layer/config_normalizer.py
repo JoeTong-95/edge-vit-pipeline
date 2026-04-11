@@ -53,6 +53,7 @@ def normalize_config(raw_config: dict[str, Any]) -> ConfigurationLayerConfig:
         config_vlm_model=str(merged["config_vlm_model"]).strip(),
         config_vlm_crop_feedback_enabled=_normalize_bool(merged["config_vlm_crop_feedback_enabled"], "config_vlm_crop_feedback_enabled"),
         config_vlm_crop_cache_size=int(merged["config_vlm_crop_cache_size"]),
+        config_vlm_dead_after_lost_frames=int(merged["config_vlm_dead_after_lost_frames"]),
         config_scene_awareness_enabled=_normalize_bool(
             merged["config_scene_awareness_enabled"],
             "config_scene_awareness_enabled",

@@ -32,9 +32,27 @@ def main() -> None:
     parser.add_argument('--device', default='auto')
     parser.add_argument('--query-type', default='vehicle_semantics_v1')
     parser.add_argument('--disabled', action='store_true')
+    parser.add_argument('--sample-only', action='store_true', help='Print sample VLM output JSON strings without loading the model.')
+    parser.add_argument('--output-dir', type=Path, default=None, help='Directory for saved VLM debug images.')
     args = parser.parse_args()
 
     layer = _load_layer_module()
+    output_dir = args.output_dir if args.output_dir is not None else layer.DEFAULT_VLM_DEBUG_OUTPUT_DIR
+    if args.sample_only:
+        print('Sample VLM output JSON strings:')
+        for sample_json in layer.build_sample_vlm_output_json_strings():
+            print(sample_json)
+            print()
+        sample_image = Image.open(DEFAULT_IMAGE_PATH).convert('RGB')
+        saved_paths = layer.save_sample_vlm_output_debug_images(
+            sample_image=sample_image,
+            output_dir=output_dir,
+        )
+        print('Saved sample debug images:')
+        for saved_path in saved_paths:
+            print(saved_path)
+        return
+
     image_path = args.image.expanduser().resolve()
     if not image_path.exists():
         raise FileNotFoundError(f'Smoke-test image not found: {image_path}')
@@ -73,6 +91,7 @@ def main() -> None:
     )
     normalized_result = layer.normalize_vlm_result(raw_result)
     layer_package = layer.build_vlm_layer_package(raw_result)
+    ack_package = layer.build_vlm_ack_package_from_result(raw_result)
 
     print('\nRaw result:')
     print(json.dumps({
@@ -87,6 +106,20 @@ def main() -> None:
 
     print('\nLayer package:')
     print(json.dumps(layer.serialize_vlm_layer_package(layer_package), indent=2))
+
+    print('\nAck package:')
+    print(json.dumps(layer.serialize_vlm_ack_package(ack_package), indent=2))
+
+    print('\nCombined output JSON:')
+    print(layer.format_vlm_output_json(raw_result))
+
+    saved_debug_image = layer.save_vlm_debug_image(
+        vlm_frame_cropper_layer_package=burner_package,
+        vlm_layer_raw_result=raw_result,
+        output_dir=output_dir,
+    )
+    print('\nSaved debug image:')
+    print(saved_debug_image)
 
 
 if __name__ == '__main__':

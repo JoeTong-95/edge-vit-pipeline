@@ -1,5 +1,24 @@
 Layer changes in this branch
 
+- Simplified the active VLM prompt contract to a short rigid JSON-only format:
+  first answer whether the crop matches an active YOLO label such as `truck`
+  or `bus`, then if yes return only numeric `wheel_count`,
+  numeric `estimated_weight_kg`, `ack_status`, and `retry_reasons`.
+- Removed `vlm_image_quality_notes` from the active VLM contract and kept
+  `retry_reasons` as the only structured explanation for bad crops such as
+  `occluded` or `bad_angle`.
+- Stopped asking the model for `truck_type` and prompt-side `confidence` in the
+  active contract.
+- Added `run_config_vlm_once.py` as the real config-driven runner for:
+  `input -> YOLO -> tracking -> cropper -> VLM`.
+- Added saved debug-image generation for both sample outputs and real
+  config-driven VLM runs.
+- Iterated the saved debug-image layout during this session:
+  dark theme, larger fonts, top-row crop preview, and simplified displayed
+  fields (`track id`, `model id`, prompt, actual VLM output).
+- Updated parsing defaults so numeric fields now fall back to `0` instead of
+  string `unknown` in the active prompt/JSON path.
+
 - Added `VLMAckPackage`, `build_vlm_ack_package`, and `serialize_vlm_ack_package` so the VLM layer can explicitly acknowledge whether a dispatched crop was accepted, needs retry, or should be finalized with the current best crop.
 - Documented the VLM layer's acknowledgement role in the layer README so it is clear how this layer now participates in the one-shot dispatch loop.
 - Added `preview_vlm_applied_prompt` for visualization/debug of the processor chat-template string.
@@ -14,3 +33,23 @@ Layer changes in this branch
 - Removed the catch-all retry reason `other` from the VLM schema, parser fallbacks, and visualizer summaries so retry messages stay explicit and actionable.
 - Narrowed retry reasons to only `occluded` or `bad_angle` across the prompt, parser, and visualizer fallbacks.
 - Added `visualize_vlm_realtime.py`, a non-blocking helper that keeps the feed moving while VLM inference runs on a background worker so queue lag and throughput can be inspected.
+
+## 2026-04-10
+
+- Added explicit truck gate semantics to the VLM normalization and ack path:
+  `is_truck=false` now returns an accepted `not_truck` acknowledgement so
+  downstream state can mark the track `dead`.
+- Updated the visualizer orchestration so cropper dispatch mode
+  `dead_best_available` uses a single-shot truck check and still produces a
+  final VLM decision for incomplete cache rounds that ended in a dead track.
+- Updated VLM visual debug state so terminal tracks are shown as `dead` or
+  `done` instead of the older generic progressed wording.
+- Updated the rejection path to use acknowledgement reason `no`, so VLM
+  rejection of the currently flagged labels is distinct from cropper-side
+  `dead` caused by the lost threshold.
+- Added `visualize_vlm_roi.py`, a cross-layer helper that shows ROI
+  calibration first and then runs the tracking -> cropper selection -> VLM
+  sequence inside the locked ROI crop.
+- Added `visualize_vlm_roi_realtime.py`, an async ROI-integrated helper that
+  keeps the feed moving after ROI lock while VLM inference runs in a background
+  worker.

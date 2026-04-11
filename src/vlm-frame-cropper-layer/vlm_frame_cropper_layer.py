@@ -27,8 +27,10 @@ CROP_SELECTION_AREA_WEIGHT = 0.35
 CROP_SELECTION_RECENCY_WEIGHT = 0.05
 CROP_SELECTION_AREA_NORMALIZER = 50000.0
 CROP_SELECTION_FRAME_NORMALIZER = 10000.0
+VLM_CROP_CONTEXT_PADDING_RATIO = 0.12
 
 _ALLOWED_VLM_ACK_STATUSES = {"accepted", "retry_requested", "finalize_with_current"}
+_NO_ACK_REASON = "no"
 
 
 def build_vlm_frame_cropper_request_package(
@@ -70,11 +72,18 @@ def build_vlm_frame_cropper_package(vlm_frame_cropper_request_package: dict[str,
     }
 
 
-def initialize_vlm_crop_cache(config_vlm_crop_cache_size: int = 5) -> dict[str, Any]:
+def initialize_vlm_crop_cache(config_vlm_crop_cache_size: int = 5, config_vlm_dead_after_lost_frames: int = 3) -> dict[str, Any]:
     cache_size = int(config_vlm_crop_cache_size)
     if cache_size <= 0:
         raise ValueError("config_vlm_crop_cache_size must be greater than 0.")
-    return {"config_vlm_crop_cache_size": cache_size, "track_caches": {}}
+    dead_after_lost_frames = int(config_vlm_dead_after_lost_frames)
+    if dead_after_lost_frames <= 0:
+        raise ValueError("config_vlm_dead_after_lost_frames must be greater than 0.")
+    return {
+        "config_vlm_crop_cache_size": cache_size,
+        "config_vlm_dead_after_lost_frames": dead_after_lost_frames,
+        "track_caches": {},
+    }
 
 
 def refresh_vlm_crop_cache_track_state(vlm_crop_cache_state: dict[str, Any], tracking_layer_row: dict[str, Any], vlm_frame_cropper_frame_id: int) -> dict[str, Any]:
@@ -84,7 +93,23 @@ def refresh_vlm_crop_cache_track_state(vlm_crop_cache_state: dict[str, Any], tra
     track_cache["last_status"] = str(tracking_layer_row["status"])
     track_cache["last_frame_id"] = int(vlm_frame_cropper_frame_id)
     track_cache["detector_class"] = str(tracking_layer_row["detector_class"])
-    if track_cache["vlm_retry_requested"] and track_cache["last_status"] == "lost" and track_cache["vlm_sent_count"] > 0:
+    if track_cache["last_status"] == "lost":
+        track_cache["lost_frame_streak"] += 1
+    else:
+        track_cache["lost_frame_streak"] = 0
+
+    dead_after_lost_frames = vlm_crop_cache_state["config_vlm_dead_after_lost_frames"]
+    if track_cache["lost_frame_streak"] >= dead_after_lost_frames:
+        track_cache["vlm_dead"] = True
+        if track_cache["vlm_terminal_state"] == "collecting":
+            track_cache["vlm_terminal_state"] = "dead"
+
+    if (
+        track_cache["vlm_retry_requested"]
+        and track_cache["last_status"] == "lost"
+        and track_cache["vlm_sent_count"] > 0
+        and track_cache["lost_frame_streak"] >= dead_after_lost_frames
+    ):
         track_cache["vlm_retry_requested"] = False
         track_cache["vlm_request_in_flight"] = False
         track_cache["vlm_finalized"] = True
@@ -100,7 +125,7 @@ def update_vlm_crop_cache(vlm_crop_cache_state: dict[str, Any], tracking_layer_r
     _validate_tracking_layer_row(tracking_layer_row)
     _validate_cropper_layer_package(vlm_frame_cropper_layer_package)
     track_cache = refresh_vlm_crop_cache_track_state(vlm_crop_cache_state=vlm_crop_cache_state, tracking_layer_row=tracking_layer_row, vlm_frame_cropper_frame_id=vlm_frame_cropper_frame_id)
-    if str(tracking_layer_row["status"]) == "lost" or track_cache["vlm_finalized"]:
+    if str(tracking_layer_row["status"]) == "lost" or track_cache["vlm_finalized"] or track_cache["vlm_dead"]:
         return track_cache
 
     cached_crop = {
@@ -135,7 +160,10 @@ def build_vlm_dispatch_package(vlm_crop_cache_state: dict[str, Any], vlm_frame_c
     dispatch_mode = None
     dispatch_reason = None
 
-    if track_cache["vlm_sent_count"] == 0:
+    if track_cache["vlm_sent_count"] == 0 and track_cache["vlm_dead"]:
+        dispatch_mode = "dead_best_available"
+        dispatch_reason = "lost_streak_threshold_reached_partial_cache"
+    elif track_cache["vlm_sent_count"] == 0:
         if cached_crop_count < cache_size:
             return None
         dispatch_mode = "initial_candidate"
@@ -159,6 +187,8 @@ def build_vlm_dispatch_package(vlm_crop_cache_state: dict[str, Any], vlm_frame_c
     track_cache["vlm_retry_requested"] = False
     track_cache["vlm_previous_sent_must_be_used"] = False
     track_cache["vlm_sent_count"] += 1
+    if dispatch_mode == "dead_best_available":
+        track_cache["vlm_terminal_state"] = "dead"
     track_cache["vlm_last_sent_frame_id"] = selected_crop["frame_id"]
     track_cache["vlm_last_sent_selection_key"] = selected_crop["selection_key"]
     track_cache["vlm_last_dispatch_reason"] = dispatch_reason
@@ -199,15 +229,21 @@ def register_vlm_ack_package(vlm_crop_cache_state: dict[str, Any], vlm_ack_packa
         track_cache["vlm_retry_requested"] = False
         track_cache["vlm_finalized"] = True
         track_cache["vlm_previous_sent_must_be_used"] = False
+        if ack_reason == _NO_ACK_REASON:
+            track_cache["vlm_terminal_state"] = "no"
+        else:
+            track_cache["vlm_terminal_state"] = "done"
     elif ack_status == "retry_requested":
         track_cache["vlm_retry_requested"] = retry_requested or True
         track_cache["vlm_previous_sent_must_be_used"] = False
         track_cache["cached_crops"] = []
         track_cache["selected_crop"] = None
+        track_cache["vlm_terminal_state"] = "collecting"
     elif ack_status == "finalize_with_current":
         track_cache["vlm_retry_requested"] = False
         track_cache["vlm_finalized"] = True
         track_cache["vlm_previous_sent_must_be_used"] = True
+        track_cache["vlm_terminal_state"] = "done"
     return deepcopy(track_cache)
 
 
@@ -235,7 +271,12 @@ def resolve_source_frame(input_layer_package: Any, vlm_frame_cropper_request_pac
 
 
 def crop_object_from_frame(source_frame: np.ndarray, vlm_frame_cropper_bbox: tuple[int | float, int | float, int | float, int | float]) -> np.ndarray:
-    x_min, y_min, x_max, y_max = _normalize_bbox(bbox=vlm_frame_cropper_bbox, frame_image=source_frame)
+    expanded_bbox = _expand_bbox_with_context(
+        bbox=vlm_frame_cropper_bbox,
+        frame_image=source_frame,
+        padding_ratio=VLM_CROP_CONTEXT_PADDING_RATIO,
+    )
+    x_min, y_min, x_max, y_max = _normalize_bbox(bbox=expanded_bbox, frame_image=source_frame)
     return source_frame[y_min:y_max, x_min:x_max].copy()
 
 
@@ -280,7 +321,8 @@ def _validate_cropper_layer_package(vlm_frame_cropper_layer_package: dict[str, A
 
 
 def _validate_vlm_crop_cache_state(vlm_crop_cache_state: dict[str, Any]) -> None:
-    if "config_vlm_crop_cache_size" not in vlm_crop_cache_state or "track_caches" not in vlm_crop_cache_state:
+    required = {"config_vlm_crop_cache_size", "config_vlm_dead_after_lost_frames", "track_caches"}
+    if not required.issubset(vlm_crop_cache_state):
         raise ValueError("vlm_crop_cache_state is missing required fields.")
 
 
@@ -309,6 +351,7 @@ def _ensure_track_cache_entry(vlm_crop_cache_state: dict[str, Any], track_id: An
             "last_frame_id": -1,
             "detector_class": "unknown",
             "vlm_sent_count": 0,
+            "lost_frame_streak": 0,
             "vlm_request_in_flight": False,
             "vlm_retry_requested": False,
             "vlm_ack_status": "not_requested",
@@ -320,6 +363,8 @@ def _ensure_track_cache_entry(vlm_crop_cache_state: dict[str, Any], track_id: An
             "vlm_last_sent_package": None,
             "vlm_previous_sent_must_be_used": False,
             "vlm_finalized": False,
+            "vlm_dead": False,
+            "vlm_terminal_state": "collecting",
         }
     return vlm_crop_cache_state["track_caches"][track_key]
 
@@ -355,6 +400,26 @@ def _normalize_bbox(bbox: tuple[int | float, int | float, int | float, int | flo
     return (x_min, y_min, x_max, y_max)
 
 
+def _expand_bbox_with_context(
+    bbox: tuple[int | float, int | float, int | float, int | float],
+    frame_image: np.ndarray,
+    padding_ratio: float,
+) -> tuple[float, float, float, float]:
+    x_min, y_min, x_max, y_max = bbox
+    bbox_width = max(1.0, float(x_max) - float(x_min))
+    bbox_height = max(1.0, float(y_max) - float(y_min))
+
+    pad_x = bbox_width * float(padding_ratio)
+    pad_y = bbox_height * float(padding_ratio)
+
+    return (
+        float(x_min) - pad_x,
+        float(y_min) - pad_y,
+        float(x_max) + pad_x,
+        float(y_max) + pad_y,
+    )
+
+
 __all__ = [
     "build_vlm_dispatch_package",
     "build_vlm_frame_cropper_package",
@@ -371,6 +436,7 @@ __all__ = [
     "CROP_SELECTION_RECENCY_WEIGHT",
     "CROP_SELECTION_AREA_NORMALIZER",
     "CROP_SELECTION_FRAME_NORMALIZER",
+    "VLM_CROP_CONTEXT_PADDING_RATIO",
     "select_best_vlm_crop_candidate",
     "update_vlm_crop_cache",
     "validate_crop_result",

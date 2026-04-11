@@ -13,6 +13,7 @@ CONFIG_ALLOWED_KEYS = {
     "config_vlm_model",
     "config_vlm_crop_feedback_enabled",
     "config_vlm_crop_cache_size",
+    "config_vlm_dead_after_lost_frames",
     "config_scene_awareness_enabled",
     "config_metadata_output_enabled",
     "config_evaluation_output_enabled",

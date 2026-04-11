@@ -1,5 +1,14 @@
 # YOLO Layer Changes
 
+## 2026-04-10
+
+- Added `TAG_FILTER_BEHAVIOR.md` to document the difference between the bundled YOLO weight taxonomy and the repo's active downstream class filter.
+- Documented that `class_map.py` is the switchboard for detector tag policy: adding, removing, or renaming entries changes what the Python pipeline keeps after YOLO inference.
+- Updated `README.md` to point to `TAG_FILTER_BEHAVIOR.md` as the reference for current forwarded versus discarded detector tags.
+- Expanded the current target classes to include `car` alongside `bus` and `truck`, so SUV-like vehicles, pickups, and vans that COCO-style YOLO often collapses into `car` now reach downstream logic.
+- Updated `detector.py` so when ROI is active and locked, YOLO uses the actual ROI crop shape as `imgsz` for inference instead of reverting to the model's default square input size. This makes ROI-cropped inference meaningfully different from full-frame inference in compute cost.
+- Rounded ROI-driven `imgsz` up to stride-safe multiples inside `detector.py` before calling Ultralytics, so the ROI path no longer emits repeated runtime warnings about auto-adjusted image sizes.
+
 ## 2026-04-08
 
 - Updated `initialize_yolo_layer` in `detector.py` to prefer bundled local weights from `src/yolo-layer/models/` before falling back to Ultralytics model lookup.

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 visualize_vlm_frame_cropper.py
-Visualize tracked vehicle crop caches on a canvas alongside frame overlays.
+Visualize tracked vehicle crop caches on a stable fixed-panel canvas.
 
 Run from src/vlm-frame-cropper-layer:
     python .\visualize_vlm_frame_cropper.py
@@ -48,6 +48,9 @@ STATUS_COLORS = {
     "new": (0, 255, 0),
     "active": (255, 180, 0),
     "lost": (0, 0, 255),
+    "dead": (180, 0, 180),
+    "no": (170, 170, 170),
+    "done": (0, 200, 120),
 }
 FRAME_TEXT = (245, 245, 245)
 SHADOW_TEXT = (0, 0, 0)
@@ -56,8 +59,11 @@ CARD_BG = (34, 34, 34)
 CELL_BG = (28, 28, 28)
 MUTED_TEXT = (180, 180, 180)
 SELECTED_BORDER = (255, 255, 255)
-TEXT_SUPERSAMPLE = 1
-DISPLAY_SCALE = 1.6
+# Keep the cropper visualizer at native scale so the preview does not look
+# oversized or soft on screen. Users can still resize the OpenCV window.
+DISPLAY_SCALE = 1.0
+PREVIEW_MAX_WIDTH = 1800
+PREVIEW_MAX_HEIGHT = 1000
 THUMBNAIL_CACHE = {}
 
 
@@ -81,6 +87,7 @@ def load_runtime_settings():
         "device": get_config_value(config, "config_device"),
         "vlm_enabled": get_config_value(config, "config_vlm_enabled"),
         "vlm_crop_cache_size": get_config_value(config, "config_vlm_crop_cache_size"),
+        "vlm_dead_after_lost_frames": get_config_value(config, "config_vlm_dead_after_lost_frames"),
         "output": "",
     }
 
@@ -129,7 +136,6 @@ def tracking_rows(tracking_pkg):
 def draw_text_block(frame, lines, origin=(10, 30), color=FRAME_TEXT, scale=0.44, line_gap=22):
     if not lines:
         return
-
     x, y = origin
     for line in lines:
         cv2.putText(frame, line, (x + 2, y + 2), cv2.FONT_HERSHEY_SIMPLEX, scale, SHADOW_TEXT, 3, cv2.LINE_AA)
@@ -166,10 +172,20 @@ def draw_panel_header(panel, title, subtitle=None):
 
 
 def paste_with_aspect(panel, image, x, y, target_w, target_h, cache_key=None):
-    if image.size == 0:
+    panel_h, panel_w = panel.shape[:2]
+    if x >= panel_w or y >= panel_h or target_w <= 0 or target_h <= 0:
         return
+    x2 = min(panel_w, x + target_w)
+    y2 = min(panel_h, y + target_h)
+    if x2 <= x or y2 <= y:
+        return
+
+    cv2.rectangle(panel, (x, y), (x2, y2), CELL_BG, -1)
+    if image is None or image.size == 0:
+        return
+
     img_h, img_w = image.shape[:2]
-    scale = min(target_w / img_w, target_h / img_h)
+    scale = min((x2 - x) / img_w, (y2 - y) / img_h)
     draw_w = max(1, int(img_w * scale))
     draw_h = max(1, int(img_h * scale))
     if cache_key is not None:
@@ -182,7 +198,11 @@ def paste_with_aspect(panel, image, x, y, target_w, target_h, cache_key=None):
         resized = cv2.resize(image, (draw_w, draw_h), interpolation=cv2.INTER_LINEAR)
     x_offset = x + (target_w - draw_w) // 2
     y_offset = y + (target_h - draw_h) // 2
-    panel[y_offset:y_offset + draw_h, x_offset:x_offset + draw_w] = resized
+    paste_w = min(draw_w, panel_w - x_offset)
+    paste_h = min(draw_h, panel_h - y_offset)
+    if paste_w <= 0 or paste_h <= 0:
+        return
+    panel[y_offset:y_offset + paste_h, x_offset:x_offset + paste_w] = resized[:paste_h, :paste_w]
 
 
 def build_cache_rows(cache_state):
@@ -190,16 +210,15 @@ def build_cache_rows(cache_state):
     for entry in cache_state["track_caches"].values():
         if entry["cached_crops"]:
             entries.append(entry)
-    status_order = {"new": 0, "active": 1, "lost": 2}
+    status_order = {"new": 0, "active": 1, "lost": 2, "dead": 3, "no": 4, "done": 5}
     entries.sort(
         key=lambda entry: (
-            status_order.get(entry["last_status"], 9),
+            status_order.get(entry["vlm_terminal_state"] if entry.get("vlm_terminal_state") in {"dead", "no", "done"} else entry["last_status"], 9),
             -int(entry["last_frame_id"]),
             entry["track_id"],
         )
     )
     return entries
-
 
 
 def get_cache_layout(cache_size):
@@ -264,7 +283,8 @@ def build_crop_cache_panel(cache_state, frame_height, panel_width):
     for row_index, entry in enumerate(clipped_rows):
         top = start_y + (row_index * row_h)
         bottom = top + row_h - 10
-        row_color = STATUS_COLORS.get(entry["last_status"], (220, 220, 220))
+        display_status = entry["vlm_terminal_state"] if entry.get("vlm_terminal_state") in {"dead", "no", "done"} else entry["last_status"]
+        row_color = STATUS_COLORS.get(display_status, (220, 220, 220))
         cv2.rectangle(panel, (margin_x, top), (content_right, bottom), CARD_BG, -1)
         cv2.rectangle(panel, (margin_x, top), (content_right, bottom), row_color, 1)
 
@@ -273,7 +293,7 @@ def build_crop_cache_panel(cache_state, frame_height, panel_width):
             panel,
             [
                 f"ID {entry['track_id']}",
-                f"{entry['last_status']} {entry['detector_class']}",
+                f"{display_status} {entry['detector_class']}",
                 f"best {best_conf:.2f}",
             ],
             origin=(margin_x + 8, top + 18),
@@ -331,10 +351,11 @@ def build_canvas(frame_view, cache_state, panel_width):
     frame_height, frame_width = frame_view.shape[:2]
     display_height = int(frame_height * DISPLAY_SCALE)
     display_width = int(frame_width * DISPLAY_SCALE)
-    display_panel_width = int(panel_width * DISPLAY_SCALE)
-
     display_frame = cv2.resize(frame_view, (display_width, display_height), interpolation=cv2.INTER_LINEAR)
-    right_panel = build_crop_cache_panel(cache_state, display_height, display_panel_width)
+
+    display_panel_width = int(panel_width * DISPLAY_SCALE)
+    right_panel_base = build_crop_cache_panel(cache_state, frame_height, panel_width)
+    right_panel = cv2.resize(right_panel_base, (display_panel_width, display_height), interpolation=cv2.INTER_LINEAR)
     canvas = np.zeros((display_height, display_width + display_panel_width, 3), dtype=np.uint8)
     canvas[:, :display_width] = display_frame
     canvas[:, display_width:] = right_panel
@@ -355,6 +376,11 @@ def main():
     parser.add_argument("--show", action="store_true")
     parser.add_argument("--output", default=defaults["output"], help="Optional output video path")
     args = parser.parse_args()
+
+    window_name = "VLM Frame Cropper Visualizer"
+    preview_window_sized = False
+    if args.show:
+        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
 
     frame_resolution = tuple(defaults["frame_resolution"])
     fps, width, height = probe_video_metadata(args.input_source, args.video, frame_resolution)
@@ -378,7 +404,7 @@ def main():
     )
     initialize_yolo_layer(model_name=args.model, conf_threshold=args.conf, device=args.device)
     initialize_tracking_layer(frame_rate=int(fps))
-    crop_cache_state = initialize_vlm_crop_cache(defaults["vlm_crop_cache_size"])
+    crop_cache_state = initialize_vlm_crop_cache(defaults["vlm_crop_cache_size"], defaults["vlm_dead_after_lost_frames"])
 
     start_time = time.time()
     try:
@@ -431,14 +457,13 @@ def main():
                 )
 
             canvas = build_canvas(base_frame_view, crop_cache_state, panel_width)
-            display_tracking_pkg = {
-                key: value for key, value in tracking_pkg.items()
-            }
+            display_tracking_pkg = {key: value for key, value in tracking_pkg.items()}
             for index, bbox in enumerate(display_tracking_pkg["tracking_layer_bbox"]):
                 display_tracking_pkg["tracking_layer_bbox"][index] = [int(coord * DISPLAY_SCALE) for coord in bbox]
-            draw_tracking_overlay(canvas[:, :int(base_frame_view.shape[1] * DISPLAY_SCALE)], display_tracking_pkg)
+            left_width = int(base_frame_view.shape[1] * DISPLAY_SCALE)
+            draw_tracking_overlay(canvas[:, :left_width], display_tracking_pkg)
             draw_hud_box(
-                canvas[:, :int(base_frame_view.shape[1] * DISPLAY_SCALE)],
+                canvas[:, :left_width],
                 [
                     f"Frame: {input_package.input_layer_frame_id}",
                     f"Tracks: {len(tracking_pkg['tracking_layer_track_id'])}",
@@ -452,7 +477,13 @@ def main():
                 out.write(canvas)
 
             if args.show:
-                cv2.imshow("VLM Frame Cropper Visualizer", canvas)
+                cv2.imshow(window_name, canvas)
+                if not preview_window_sized:
+                    canvas_height, canvas_width = canvas.shape[:2]
+                    preview_width = min(canvas_width, PREVIEW_MAX_WIDTH)
+                    preview_height = min(canvas_height, PREVIEW_MAX_HEIGHT)
+                    cv2.resizeWindow(window_name, preview_width, preview_height)
+                    preview_window_sized = True
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
 

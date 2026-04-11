@@ -98,37 +98,26 @@ This is a strong integration role because these layers sit at the boundary betwe
 ## Layer Overview
 
 
-## Truck Type Semantics
+## VLM Semantic Gate
 
-The current pipeline contract already reserves `vehicle_state_layer_truck_type` as a stable stored field, but the meaning of that field should be explicit:
+The current VLM contract is intentionally narrow:
 
-- `truck_type` is an optional semantic subtype inferred by the VLM path.
-- `truck_type` is more specific than the detector class labels `truck` or `bus`.
-- `truck_type` should stay stable, human-readable, and low-cardinality so it can be stored in metadata and compared across runs.
-- if the crop is not clear enough to support subtype classification, the system should prefer `unknown` rather than inventing a subtype.
-
-Recommended v1 truck-type vocabulary:
-
-- `unknown`
-- `pickup_truck`
-- `box_truck`
-- `dump_truck`
-- `cement_mixer`
-- `semi_truck`
-- `flatbed_truck`
-- `garbage_truck`
-- `tow_truck`
-- `tank_truck`
-- `fire_truck`
-- `bus`
-- `van`
+- first decide whether the crop is one of the currently active YOLO labels, such as `truck` or `bus`
+- if not, return `is_truck=false` and acknowledge the track with reason `no`
+- if yes, return a small JSON payload with only:
+  - `wheel_count`
+  - `estimated_weight_kg`
+  - `ack_status`
+  - `retry_reasons`
 
 Important notes:
 
-- this vocabulary is a semantic metadata contract, not a YOLO detector-class contract
-- the detector may still only output `truck` or `bus`
-- the VLM layer may normalize a free-form model response into one of the recommended values above
-- downstream metadata output should treat `truck_type` as optional and allow `unknown`
+- the allowed label set comes from the currently active detector-label filter, not from a separate semantic vocabulary
+- `retry_reasons` is the structured explanation for a bad crop
+- the currently allowed retry reasons are:
+  - `occluded`
+  - `bad_angle`
+- free-text image-quality notes are not part of the current VLM contract
 
 
 ### 1. Configuration Layer
@@ -160,6 +149,7 @@ Typical controls:
 - `config_vlm_model`: VLM model used for semantic inference.
 - `config_vlm_crop_feedback_enabled`: controls whether VLM may ask the cropper for a fresh candidate round after the first dispatch.
 - `config_vlm_crop_cache_size`: number of candidate crops cached per track before the cropper-side selector dispatches one crop to VLM.
+- `config_vlm_dead_after_lost_frames`: number of consecutive `lost` updates after which the cropper-side VLM flow marks a track terminal `dead`.
 - `config_scene_awareness_enabled`: enable or disable the optional full-frame scene-awareness path.
 - `config_metadata_output_enabled`: enable or disable structured metadata output.
 - `config_evaluation_output_enabled`: enable or disable evaluation and telemetry output.
@@ -358,6 +348,12 @@ Config parameters used:
 - `config_yolo_confidence_threshold`: sets the minimum confidence accepted in `filter_yolo_detections`.
 - `config_device`: selects the execution target for YOLO inference.
 
+Important note:
+
+- the bundled YOLO weights may know many labels, but the current repo only forwards classes listed in `src/yolo-layer/class_map.py`
+- `src/yolo-layer/TAG_FILTER_BEHAVIOR.md` is the practical reference for what the current filter keeps versus discards
+- editing `class_map.py` changes what reaches downstream tracking, cropper, and VLM helper visualizers
+
 #### yolo_layer_package
 
 Produces:
@@ -498,12 +494,13 @@ Package fields:
 - `vehicle_state_layer_last_seen_frame`: most recent frame where the tracked object was updated.
 - `vehicle_state_layer_lost_frame_count`: number of consecutive frames where the object has been missing.
 - `vehicle_state_layer_vehicle_class`: current stored class for the object.
-- `vehicle_state_layer_truck_type`: semantic truck subtype when available.
+- `vehicle_state_layer_truck_type`: legacy semantic subtype slot from earlier VLM iterations; currently downstream code may still store the accepted label here for compatibility, but the active VLM prompt no longer asks for subtype classification.
 - `vehicle_state_layer_semantic_tags`: stored semantic labels or attributes.
 - `vehicle_state_layer_vlm_called`: whether semantic enrichment has already been requested or recorded.
 - `vehicle_state_layer_vlm_ack_status`: latest VLM acknowledgement state for the track.
 - `vehicle_state_layer_vlm_retry_requested`: whether VLM has explicitly asked for a better crop.
 - `vehicle_state_layer_vlm_final_candidate_sent`: whether the cropper already sent the final best-available crop after the object left scope.
+- `vehicle_state_layer_terminal_status`: persistent terminal state for the semantic path, such as `tracking`, `no`, `done`, or `dead`.
 
 Ownership:
 
@@ -560,6 +557,7 @@ Config parameters used:
 - `config_vlm_enabled`: controls whether crop requests should be prepared for the VLM path.
 - `config_vlm_crop_feedback_enabled`: when true, cropper may reopen collection after a VLM retry request; when false, the first dispatched crop completes that track.
 - `config_vlm_crop_cache_size`: controls how many candidate crops are collected per track before the cropper selects one for dispatch.
+- `config_vlm_dead_after_lost_frames`: controls how many consecutive `lost` states are tolerated before the cropper marks the track `dead`.
 
 #### vlm_frame_cropper_request_package
 
@@ -600,6 +598,13 @@ Package fields:
 - `vlm_dispatch_cached_crop_count`: number of candidate crops considered when dispatching.
 - `vlm_frame_cropper_layer_package`: the selected crop package forwarded to the VLM layer.
 
+Recommended `vlm_dispatch_mode` values in the current branch:
+
+- `initial_candidate`
+- `retry_candidate`
+- `use_previous_sent_final`
+- `dead_best_available`
+
 #### vlm_frame_cropper_node
 
 Purpose:
@@ -614,6 +619,12 @@ Internal functions:
 - `validate_crop_result`: check that the crop is usable before VLM inference.
 - `score_vlm_crop_candidate`: rank cached crops using detector confidence, crop area, and recency.
 - `select_best_vlm_crop_candidate`: choose the current best crop from the local cache.
+
+Current dead-track rule:
+
+- if a track remains `lost` for `config_vlm_dead_after_lost_frames`, the cropper marks it terminal `dead`
+- if the first cache round never reached `config_vlm_crop_cache_size`, the cropper still dispatches the best available partial-cache crop once the track is dead
+- after a retry request, a dead track may instead finalize by reusing the previous sent image
 
 Interacts with:
 
@@ -688,6 +699,11 @@ Recommended retry-reason vocabulary for `vlm_ack_reason` or the VLM-side `retry_
 - `occluded`
 - `bad_angle`
 
+Current target gate rule:
+
+- if VLM decides the crop is not one of the currently flagged detector labels, the acknowledgement is accepted with reason `no` and downstream state marks the track `no`
+- if VLM decides the crop is one of the currently flagged detector labels, semantic JSON is accepted and downstream state marks the track `done`
+
 Ownership:
 
 - `vlm_layer` owns semantic inference output for the current query.
@@ -708,8 +724,10 @@ Internal functions:
 
 Expected `vehicle_semantics_v1` behavior:
 
-- when the image is good enough, VLM should return structured semantic JSON and `ack_status=accepted`
-- when the image is not good enough, VLM should return `ack_status=retry_requested` plus one or more retry reasons such as `occluded` or `bad_angle`
+- the prompt should first ask: is this one of the currently active YOLO labels, such as `truck` or `bus`?
+- if no: return `is_truck=false`, `ack_status=accepted`, and no retry reasons
+- if yes and the image is good enough: return rigid JSON with `wheel_count`, `estimated_weight_kg`, `ack_status=accepted`, and `retry_reasons=[]`
+- if yes but the image is not good enough: return rigid JSON with `ack_status=retry_requested` plus one or more retry reasons such as `occluded` or `bad_angle`
 
 Interacts with:
 
@@ -974,8 +992,14 @@ When `config_vlm_crop_feedback_enabled` is `false`:
 
 - cropper still waits for one full cache round
 - one best crop is dispatched once
-- VLM returns structured JSON classification
+- VLM returns one rigid JSON decision
 - that track is marked progressed and no longer re-enters cropper or VLM, although tracking may continue updating it
+
+When a track becomes dead before its first cache round is full:
+
+- cropper may still emit one `dead_best_available` dispatch using the best available partial cache
+- VLM performs a final target-label gate on that crop
+- rejected-label results mark the track `no`; accepted flagged-label JSON marks the track `done`
 
 ### Optional Scene Path
 

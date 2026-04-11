@@ -85,3 +85,6 @@ def validate_config_values(config: ConfigurationLayerConfig | Mapping[str, Any])
 
     if int(config_values["config_vlm_crop_cache_size"]) <= 0:
         raise ValueError("config_vlm_crop_cache_size must be greater than 0.")
+
+    if int(config_values["config_vlm_dead_after_lost_frames"]) <= 0:
+        raise ValueError("config_vlm_dead_after_lost_frames must be greater than 0.")

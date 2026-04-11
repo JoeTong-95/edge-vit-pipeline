@@ -88,7 +88,7 @@ def main() -> None:
     package = build_vlm_frame_cropper_package(request, crop)
     assert package['vlm_frame_cropper_layer_track_id'] == '101'
 
-    cache_state = initialize_vlm_crop_cache(3)
+    cache_state = initialize_vlm_crop_cache(3, 3)
     _cache_candidate(cache_state, 1, 0.70)
     _cache_candidate(cache_state, 2, 0.72)
     assert build_vlm_dispatch_package(cache_state, 101) is None
@@ -119,10 +119,15 @@ def main() -> None:
     assert retry_dispatch['vlm_dispatch_mode'] == 'retry_candidate'
 
     # If retry is requested again but the object leaves before a new round fills,
-    # cropper does not send a new image; it marks that VLM must use the previous sent crop.
+    # cropper waits for the configured lost threshold before finalizing with the previous sent crop.
     register_vlm_ack_package(cache_state, build_vlm_ack_package('101', 'retry_requested', 'still_not_good', True))
     _cache_candidate(cache_state, 7, 0.40)
     refresh_vlm_crop_cache_track_state(cache_state, _make_tracking_row(0.40, 'lost'), 7)
+    refresh_vlm_crop_cache_track_state(cache_state, _make_tracking_row(0.40, 'lost'), 8)
+    assert build_vlm_dispatch_package(cache_state, 101) is None
+    track_cache = cache_state['track_caches']['101']
+    assert track_cache['vlm_previous_sent_must_be_used'] is False
+    refresh_vlm_crop_cache_track_state(cache_state, _make_tracking_row(0.40, 'lost'), 9)
     assert build_vlm_dispatch_package(cache_state, 101) is None
     track_cache = cache_state['track_caches']['101']
     assert track_cache['vlm_previous_sent_must_be_used'] is True
@@ -130,7 +135,7 @@ def main() -> None:
     assert track_cache['vlm_last_sent_package'] is not None
 
     # Cache is a rolling last-N sequence, not a top-K score store.
-    cache_state2 = initialize_vlm_crop_cache(3)
+    cache_state2 = initialize_vlm_crop_cache(3, 3)
     _cache_candidate(cache_state2, 10, 0.90)
     _cache_candidate(cache_state2, 11, 0.91)
     _cache_candidate(cache_state2, 12, 0.92)
@@ -139,6 +144,20 @@ def main() -> None:
     tc = cache_state2['track_caches']['101']
     assert [c['frame_id'] for c in tc['cached_crops']] == [12, 13, 14]
     assert tc['selected_crop']['frame_id'] == 12
+
+    # If the object stays lost long enough before the first round is full,
+    # cropper marks it dead and sends the best available partial cache.
+    cache_state3 = initialize_vlm_crop_cache(5, 3)
+    _cache_candidate(cache_state3, 20, 0.80)
+    _cache_candidate(cache_state3, 21, 0.85)
+    _cache_candidate(cache_state3, 22, 0.83)
+    refresh_vlm_crop_cache_track_state(cache_state3, _make_tracking_row(0.83, 'lost'), 23)
+    refresh_vlm_crop_cache_track_state(cache_state3, _make_tracking_row(0.83, 'lost'), 24)
+    refresh_vlm_crop_cache_track_state(cache_state3, _make_tracking_row(0.83, 'lost'), 25)
+    dead_dispatch = build_vlm_dispatch_package(cache_state3, 101)
+    assert dead_dispatch is not None
+    assert dead_dispatch['vlm_dispatch_mode'] == 'dead_best_available'
+    assert dead_dispatch['vlm_dispatch_cached_crop_count'] == 3
 
     print('vlm_frame_cropper_layer tests passed')
 

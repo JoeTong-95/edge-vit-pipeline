@@ -15,6 +15,7 @@ from typing import Any
 
 _DEFAULT_TRUCK_TYPE = "unknown"
 _ALLOWED_VLM_ACK_STATUSES = {"not_requested", "accepted", "retry_requested", "finalize_with_current"}
+_NO_ACK_REASON = "no"
 
 _state = {
     "initialized": False,
@@ -87,6 +88,7 @@ def build_vehicle_state_layer_package(track_ids: list[str | int] | None = None) 
         "vehicle_state_layer_lost_frame_count": [record["vehicle_state_layer_lost_frame_count"] for record in selected_records],
         "vehicle_state_layer_vehicle_class": [record["vehicle_state_layer_vehicle_class"] for record in selected_records],
         "vehicle_state_layer_truck_type": [record["vehicle_state_layer_truck_type"] for record in selected_records],
+        "vehicle_state_layer_terminal_status": [record["vehicle_state_layer_terminal_status"] for record in selected_records],
         "vehicle_state_layer_semantic_tags": [deepcopy(record["vehicle_state_layer_semantic_tags"]) for record in selected_records],
         "vehicle_state_layer_vlm_called": [record["vehicle_state_layer_vlm_called"] for record in selected_records],
         "vehicle_state_layer_vlm_ack_status": [record["vehicle_state_layer_vlm_ack_status"] for record in selected_records],
@@ -103,6 +105,7 @@ def create_vehicle_state_record(vehicle_state_layer_track_id: str, vehicle_state
         "vehicle_state_layer_lost_frame_count": 0,
         "vehicle_state_layer_vehicle_class": vehicle_state_layer_vehicle_class,
         "vehicle_state_layer_truck_type": _DEFAULT_TRUCK_TYPE,
+        "vehicle_state_layer_terminal_status": "tracking",
         "vehicle_state_layer_semantic_tags": {},
         "vehicle_state_layer_vlm_called": False,
         "vehicle_state_layer_vlm_ack_status": "not_requested",
@@ -125,10 +128,14 @@ def merge_tracking_into_vehicle_state(vehicle_state_record: dict[str, Any], trac
 def merge_vlm_into_vehicle_state(vehicle_state_record: dict[str, Any], vlm_layer_label: str, vlm_layer_attributes: dict[str, Any]) -> None:
     semantic_tags = vehicle_state_record["vehicle_state_layer_semantic_tags"]
     semantic_tags.update(deepcopy(vlm_layer_attributes))
-    vehicle_state_record["vehicle_state_layer_truck_type"] = vlm_layer_attributes.get("truck_type") or vlm_layer_label or _DEFAULT_TRUCK_TYPE
+    if vlm_layer_attributes.get("is_truck") is False:
+        vehicle_state_record["vehicle_state_layer_truck_type"] = _DEFAULT_TRUCK_TYPE
+    else:
+        vehicle_state_record["vehicle_state_layer_truck_type"] = vlm_layer_attributes.get("truck_type") or _DEFAULT_TRUCK_TYPE
     vehicle_state_record["vehicle_state_layer_vlm_called"] = True
     vehicle_state_record["vehicle_state_layer_vlm_ack_status"] = "accepted"
     vehicle_state_record["vehicle_state_layer_vlm_retry_requested"] = False
+    vehicle_state_record["vehicle_state_layer_terminal_status"] = "no" if vlm_layer_attributes.get("is_truck") is False else "done"
 
 
 def merge_vlm_ack_into_vehicle_state(vehicle_state_record: dict[str, Any], vlm_ack_status: str, vlm_ack_retry_requested: bool, vlm_ack_reason: str) -> None:
@@ -138,6 +145,8 @@ def merge_vlm_ack_into_vehicle_state(vehicle_state_record: dict[str, Any], vlm_a
     vehicle_state_record["vehicle_state_layer_vlm_retry_requested"] = vlm_ack_retry_requested
     if vlm_ack_reason:
         vehicle_state_record["vehicle_state_layer_semantic_tags"]["vlm_ack_reason"] = vlm_ack_reason
+    if vlm_ack_reason == _NO_ACK_REASON:
+        vehicle_state_record["vehicle_state_layer_terminal_status"] = "no"
     if vlm_ack_status == "finalize_with_current":
         vehicle_state_record["vehicle_state_layer_vlm_final_candidate_sent"] = True
 

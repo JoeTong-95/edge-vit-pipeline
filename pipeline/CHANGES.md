@@ -1,5 +1,50 @@
 # Pipeline Changes
 
+## 2026-04-11
+
+- Updated pipeline docs to match the simplified active VLM contract used in
+  this session.
+- Replaced the older truck-subtype-focused description with the current
+  narrower target-label gate:
+  first decide whether the crop matches an active YOLO label such as `truck`
+  or `bus`, then if yes return rigid JSON.
+- Documented that the active VLM JSON now focuses on:
+  - `wheel_count`
+  - `estimated_weight_kg`
+  - `ack_status`
+  - `retry_reasons`
+- Documented that `vlm_image_quality_notes` is no longer part of the active
+  VLM contract.
+- Clarified that `vehicle_state_layer_truck_type` is now a legacy
+  compatibility slot relative to the simplified current VLM prompt.
+- Documented the real config-driven VLM runner and the simplified saved
+  debug-image outputs in the VLM-layer docs.
+
+## 2026-04-10
+
+- Added `src/yolo-layer/TAG_FILTER_BEHAVIOR.md` as the explicit reference for which YOLO/COCO tags are currently forwarded into the pipeline versus discarded by the repo's class filter.
+- Updated `pipeline_layers_and_interactions.md` to clarify that the bundled detector may know many labels, but downstream behavior depends on the active `class_map.py` filter.
+- Updated `pipeline/README.md` to point readers to the new YOLO tag-policy document when they need to understand or modify detector behavior.
+- Added pipeline-level documentation for `config_vlm_dead_after_lost_frames`, dead-track partial-cache dispatch, and the current terminal split where VLM marks tracks `dead` when `is_truck=false` and `done` when truck semantics are accepted.
+- Refined terminal semantics so VLM rejection of non-flagged labels is now
+  tracked as `no`, while `dead` remains reserved for the cropper lost-threshold
+  path.
+- Documented `src/roi-layer/visualize_roi_vlm.py` as the helper that first
+  calibrates ROI from full-frame detections and then runs YOLO + VLM only
+  inside the locked ROI crop.
+- Documented `src/vlm-layer/visualize_vlm_roi.py` as the helper that first
+  calibrates ROI and then runs the full tracking -> cropper selection -> VLM
+  loop inside the locked ROI crop.
+- Documented `src/vlm-layer/visualize_vlm_roi_realtime.py` as the async
+  ROI-integrated helper that keeps the feed moving after ROI lock while VLM
+  runs in the background.
+- Documented that once ROI is locked, the current YOLO layer now uses the
+  native ROI crop shape for inference instead of forcing ROI inputs back to the
+  model's default square inference size.
+- Cleaned up ROI inference sizing so the YOLO layer now rounds ROI crop shapes
+  to stride-safe values before inference, avoiding repetitive Ultralytics
+  warning spam without changing the intended ROI compute path.
+
 ## 2026-04-09
 
 - Documented `src/vlm-layer/visualize_vlm.py` in `pipeline/README.md` as the end-to-end VLM path visualizer.
