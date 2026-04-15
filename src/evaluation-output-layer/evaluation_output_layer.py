@@ -171,14 +171,18 @@ def emit_evaluation_output(
 
     Minimum viable sink: sqlite3 database file at `output_path`.
     """
-    if output_destination != "sqlite":
+    if output_destination not in {"sqlite", "stdout"}:
         raise ValueError(f"Unsupported output_destination: {output_destination!r}")
-
-    os.makedirs(os.path.dirname(os.path.abspath(output_path)) or ".", exist_ok=True)
 
     record = evaluation_output_layer_package
     if not isinstance(record, dict):
         raise TypeError("evaluation_output_layer_package must be a dict")
+
+    if output_destination == "stdout":
+        print(json.dumps(record, separators=(",", ":"), ensure_ascii=False, sort_keys=True))
+        return
+
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)) or ".", exist_ok=True)
 
     module_latency_json = json.dumps(
         record.get("evaluation_output_layer_module_latency", {}) or {},
@@ -404,14 +408,18 @@ def emit_evaluation_output(
 
     Minimum viable sink: sqlite3 database file at `output_path`.
     """
-    if output_destination != "sqlite":
-        raise ValueError(f"Unsupported output_destination: {output_destination!r}")
-
-    os.makedirs(os.path.dirname(os.path.abspath(output_path)) or ".", exist_ok=True)
-
     record = evaluation_output_layer_package
     if not isinstance(record, dict):
         raise TypeError("evaluation_output_layer_package must be a dict")
+
+    if output_destination not in {"sqlite", "stdout"}:
+        raise ValueError(f"Unsupported output_destination: {output_destination!r}")
+
+    if output_destination == "stdout":
+        print(json.dumps(record, separators=(",", ":"), ensure_ascii=False, sort_keys=True))
+        return
+
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)) or ".", exist_ok=True)
 
     module_latency_json = json.dumps(
         record.get("evaluation_output_layer_module_latency", {}) or {},
