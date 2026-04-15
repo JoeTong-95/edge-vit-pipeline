@@ -1,5 +1,10 @@
 chat-history/
 
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*$py.class
+
 # Model weights and checkpoints
 #*.pt
 #*.pth

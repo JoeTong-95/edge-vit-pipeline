@@ -1,5 +1,9 @@
 Layer changes in this branch
 
+- ## 2026-04-15
+-
+- Added `ROI_BENCHMARK_NOTES.md` documenting why ROI sometimes appears to provide little YOLO speedup in end-to-end runs, and how to benchmark ROI correctly (post-lock sampling + infer vs post-processing timing).
+
 - Added `roi_layer.py` implementing the pipeline contract public API:
   `initialize_roi_layer`, `update_roi_state`, `apply_roi_to_frame`, and
   `build_roi_layer_package`.
