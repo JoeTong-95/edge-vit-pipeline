@@ -179,6 +179,55 @@ def run_vlm_inference(
     )
 
 
+def run_vlm_inference_batch(
+    vlm_runtime_state: VLMRuntimeState,
+    vlm_frame_cropper_layer_packages: list[VLMFrameCropperLayerPackage],
+    vlm_layer_query_types: list[str] | None = None,
+) -> list[VLMRawResult]:
+    """Run semantic inference on a batch of crops and return raw results.
+
+    Notes:
+    - Batching amortizes processor/model overhead and typically improves GPU throughput.
+    - If per-item query types are not provided, all items use DEFAULT_VLM_QUERY_TYPE.
+    """
+    if not vlm_runtime_state.config_vlm_enabled:
+        raise RuntimeError("The VLM layer is disabled, so inference cannot run.")
+    if not vlm_frame_cropper_layer_packages:
+        return []
+
+    query_types = (
+        list(vlm_layer_query_types)
+        if vlm_layer_query_types is not None
+        else [DEFAULT_VLM_QUERY_TYPE] * len(vlm_frame_cropper_layer_packages)
+    )
+    if len(query_types) != len(vlm_frame_cropper_layer_packages):
+        raise ValueError("vlm_layer_query_types must match vlm_frame_cropper_layer_packages length.")
+
+    prompts = [
+        prepare_vlm_prompt(vlm_layer_query_type=qt, vlm_frame_cropper_layer_package=pkg)
+        for qt, pkg in zip(query_types, vlm_frame_cropper_layer_packages, strict=True)
+    ]
+    raw_texts = infer_vlm_semantics_batch(
+        vlm_runtime_state=vlm_runtime_state,
+        vlm_frame_cropper_layer_packages=vlm_frame_cropper_layer_packages,
+        vlm_prompt_texts=prompts,
+    )
+
+    model_id = vlm_runtime_state.vlm_runtime_model_id
+    return [
+        VLMRawResult(
+            vlm_layer_track_id=pkg.vlm_frame_cropper_layer_track_id,
+            vlm_layer_query_type=qt,
+            vlm_layer_model_id=model_id,
+            vlm_layer_raw_text=raw_text,
+            vlm_layer_raw_response={"prompt_text": prompt, "batch_index": index},
+        )
+        for index, (pkg, qt, prompt, raw_text) in enumerate(
+            zip(vlm_frame_cropper_layer_packages, query_types, prompts, raw_texts, strict=True)
+        )
+    ]
+
+
 def normalize_vlm_result(vlm_layer_raw_result: VLMRawResult) -> dict[str, Any]:
     """Convert the raw model output into stable normalized semantic fields."""
     parsed_fields = parse_vlm_response(vlm_layer_raw_result.vlm_layer_raw_text)
@@ -258,11 +307,10 @@ def prepare_vlm_prompt(
     allowed_label_text = ", ".join(allowed_labels)
     json_only_prompt = (
         f"Allowed: {allowed_label_text}\n"
-        "No match: is_truck=no\n"
-        "Match: reply JSON only with keys is_truck, wheel_count, estimated_weight_kg, ack_status, retry_reasons\n"
-        'Bad crop: reply JSON only with ack_status="retry_requested" and retry_reasons=["occluded"] or ["bad_angle"]\n'
-        "wheel_count and estimated_weight_kg must be integers.\n"
-        "For accepted match, estimated_weight_kg must be a realistic positive integer estimate."
+        "Reply ONLY one of:\n"
+        "- is_truck=no\n"
+        '- JSON: {"is_truck":true,"wheel_count":INT,"estimated_weight_kg":INT,"ack_status":"accepted|retry_requested","retry_reasons":["occluded"]|["bad_angle"]|[]}\n'
+        "JSON keys must be exactly: is_truck, wheel_count, estimated_weight_kg, ack_status, retry_reasons"
     )
     if vlm_layer_query_type == "vehicle_semantics_v1":
         return json_only_prompt
@@ -305,7 +353,7 @@ def infer_vlm_semantics(
     with vlm_runtime_state.vlm_runtime_torch.inference_mode():
         generated_ids = vlm_runtime_state.vlm_runtime_model.generate(
             **inputs,
-            max_new_tokens=192,
+            max_new_tokens=64,
             do_sample=False,
         )
 
@@ -316,6 +364,77 @@ def infer_vlm_semantics(
         skip_special_tokens=True,
         clean_up_tokenization_spaces=False,
     )[0].strip()
+
+
+def infer_vlm_semantics_batch(
+    vlm_runtime_state: VLMRuntimeState,
+    vlm_frame_cropper_layer_packages: list[VLMFrameCropperLayerPackage],
+    vlm_prompt_texts: list[str],
+) -> list[str]:
+    """Run the model on a batch of crop images and return raw decoded texts (one per crop)."""
+    if not vlm_frame_cropper_layer_packages:
+        return []
+    if len(vlm_prompt_texts) != len(vlm_frame_cropper_layer_packages):
+        raise ValueError("vlm_prompt_texts must match vlm_frame_cropper_layer_packages length.")
+
+    images = [
+        _coerce_image(pkg.vlm_frame_cropper_layer_image)
+        for pkg in vlm_frame_cropper_layer_packages
+    ]
+    processor = vlm_runtime_state.vlm_runtime_processor
+    prompt_texts: list[str] = []
+    for prompt in vlm_prompt_texts:
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image"},
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ]
+        prompt_texts.append(_apply_chat_template(processor=processor, messages=messages))
+
+    inputs = processor(
+        text=prompt_texts,
+        images=images,
+        padding=True,
+        return_tensors="pt",
+    )
+    inputs = _move_inputs_to_device(
+        inputs=inputs,
+        device=vlm_runtime_state.vlm_runtime_device,
+    )
+
+    with vlm_runtime_state.vlm_runtime_torch.inference_mode():
+        generated_ids = vlm_runtime_state.vlm_runtime_model.generate(
+            **inputs,
+            max_new_tokens=64,
+            do_sample=False,
+        )
+
+    # Decode each item by slicing off its prompt tokens.
+    input_ids = inputs.get("input_ids")
+    if input_ids is None:
+        # Fallback: decode full outputs if input ids unavailable.
+        decoded = processor.batch_decode(
+            generated_ids,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )
+        return [text.strip() for text in decoded]
+
+    outputs: list[str] = []
+    for row_index in range(int(generated_ids.shape[0])):
+        prompt_tokens = int(input_ids[row_index].shape[0])
+        new_token_ids = generated_ids[row_index:row_index + 1, prompt_tokens:]
+        decoded = processor.batch_decode(
+            new_token_ids,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )[0].strip()
+        outputs.append(decoded)
+    return outputs
 
 
 def parse_vlm_response(vlm_layer_raw_text: str) -> dict[str, Any]:
@@ -1060,6 +1179,7 @@ __all__ = [
     "build_vlm_output_json",
     "build_sample_vlm_output_json_strings",
     "infer_vlm_semantics",
+    "infer_vlm_semantics_batch",
     "format_vlm_output_json",
     "initialize_vlm_layer",
     "normalize_vlm_result",
@@ -1067,6 +1187,7 @@ __all__ = [
     "prepare_vlm_prompt",
     "preview_vlm_applied_prompt",
     "run_vlm_inference",
+    "run_vlm_inference_batch",
     "save_sample_vlm_output_debug_images",
     "save_vlm_debug_image",
     "serialize_vlm_layer_package",

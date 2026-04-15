@@ -53,3 +53,16 @@ Layer changes in this branch
 - Added `visualize_vlm_roi_realtime.py`, an async ROI-integrated helper that
   keeps the feed moving after ROI lock while VLM inference runs in a background
   worker.
+
+## 2026-04-15
+
+- Added true batched VLM inference helpers: `infer_vlm_semantics_batch` and
+  `run_vlm_inference_batch`, enabling multi-crop micro-batching via a single
+  `model.generate(...)` call.
+- Updated `visualize_vlm_realtime.py` async VLM worker to support micro-batching
+  (`--vlm-batch-size`, `--vlm-batch-wait-ms`) and optional overflow
+  spill-to-disk queue (`--vlm-spill-queue`) for a cache-and-run workflow.
+- Added `vlm_deferred_queue.py` and `run_deferred_vlm_queue.py` to persist crop
+  tasks as JSONL (PNG base64) and process them offline later.
+- Added `VLM_OPTIMIZATION_NOTES.md` documenting realtime vs cache-and-run modes,
+  and how to run both.

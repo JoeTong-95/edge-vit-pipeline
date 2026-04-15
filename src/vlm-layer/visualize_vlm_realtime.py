@@ -52,7 +52,7 @@ from visualize_vlm import (  # noqa: E402
     probe_video_metadata,
     refresh_vlm_crop_cache_track_state,
     register_vlm_ack_package,
-    run_vlm_inference,
+    run_vlm_inference_batch,
     run_yolo_detection,
     tracking_rows,
     update_tracks,
@@ -64,10 +64,23 @@ from visualize_vlm import (  # noqa: E402
 from input_layer import InputLayer  # noqa: E402
 from tracker import assign_tracking_status  # noqa: E402
 from vlm_frame_cropper_layer import build_vlm_dispatch_package  # noqa: E402
+from vlm_deferred_queue import (  # noqa: E402
+    DeferredVLMTask,
+    append_deferred_task,
+    encode_crop_image_to_png_base64,
+)
 
 
 class AsyncVLMWorker:
-    def __init__(self, vlm_state: Any, feedback_enabled: bool, max_queue_size: int = 64) -> None:
+    def __init__(
+        self,
+        vlm_state: Any,
+        feedback_enabled: bool,
+        max_queue_size: int = 64,
+        batch_size: int = 1,
+        batch_wait_ms: int = 20,
+        spill_queue_path: str = "",
+    ) -> None:
         self.vlm_state = vlm_state
         self.feedback_enabled = feedback_enabled
         self.task_queue: queue.Queue[dict[str, Any] | None] = queue.Queue(maxsize=max_queue_size)
@@ -78,6 +91,11 @@ class AsyncVLMWorker:
         self.completed_count = 0
         self.total_runtime_sec = 0.0
         self.max_runtime_sec = 0.0
+        self.batch_size = max(1, int(batch_size))
+        self.batch_wait_ms = max(0, int(batch_wait_ms))
+        self.spill_queue_path = str(spill_queue_path or "").strip()
+        self.spilled_count = 0
+        self.spill_errors = 0
 
     def start(self) -> None:
         self.thread.start()
@@ -91,7 +109,12 @@ class AsyncVLMWorker:
         self.thread.join(timeout=2.0)
 
     def submit(self, task: dict[str, Any]) -> None:
-        self.task_queue.put_nowait(task)
+        try:
+            self.task_queue.put_nowait(task)
+        except queue.Full:
+            if not self.spill_queue_path:
+                raise
+            self._spill_task(task)
 
     def drain_results(self) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
@@ -117,6 +140,9 @@ class AsyncVLMWorker:
             "completed_count": self.completed_count,
             "avg_runtime_sec": avg_runtime,
             "max_runtime_sec": self.max_runtime_sec,
+            "batch_size": self.batch_size,
+            "spilled_count": self.spilled_count,
+            "spill_errors": self.spill_errors,
         }
 
     def _run(self) -> None:
@@ -128,56 +154,118 @@ class AsyncVLMWorker:
             if task is None:
                 break
 
-            task["started_at"] = time.time()
-            self.active_task = task
+            batch_tasks = [task]
+            batch_start = time.time()
+            deadline = batch_start + (self.batch_wait_ms / 1000.0)
+            while len(batch_tasks) < self.batch_size:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    break
+                try:
+                    next_task = self.task_queue.get(timeout=min(0.05, remaining))
+                except queue.Empty:
+                    continue
+                if next_task is None:
+                    self.stop_event.set()
+                    break
+                batch_tasks.append(next_task)
+
+            for t in batch_tasks:
+                t["started_at"] = batch_start
+            self.active_task = batch_tasks[0]
+
             try:
-                raw_result = run_vlm_inference(
-                    self.vlm_state,
-                    task["vlm_crop_pkg"],
-                    task["query_type"],
-                )
-                normalized = normalize_vlm_result(raw_result)
-                ack = (
-                    build_vlm_ack_package_from_result(raw_result)
-                    if self.feedback_enabled
-                    else build_vlm_ack_package(str(task["track_id"]), "accepted", "feedback_disabled_single_shot", False)
-                )
-                error_text = ""
+                pkgs = [t["vlm_crop_pkg"] for t in batch_tasks]
+                qtypes = [t["query_type"] for t in batch_tasks]
+                raw_results = run_vlm_inference_batch(self.vlm_state, pkgs, qtypes)
+
+                normalized_results = [normalize_vlm_result(raw) for raw in raw_results]
+                if self.feedback_enabled:
+                    acks = [build_vlm_ack_package_from_result(raw) for raw in raw_results]
+                else:
+                    acks = [
+                        build_vlm_ack_package(str(t["track_id"]), "accepted", "feedback_disabled_single_shot", False)
+                        for t in batch_tasks
+                    ]
+                error_texts = [""] * len(batch_tasks)
             except Exception as exc:
-                raw_result = None
-                normalized = None
-                ack = build_vlm_ack_package(str(task["track_id"]), "retry_requested", f"VLM error: {exc}", True)
-                error_text = str(exc)
+                raw_results = [None] * len(batch_tasks)
+                normalized_results = [None] * len(batch_tasks)
+                acks = [
+                    build_vlm_ack_package(str(t["track_id"]), "retry_requested", f"VLM error: {exc}", True)
+                    for t in batch_tasks
+                ]
+                error_texts = [str(exc)] * len(batch_tasks)
 
-            runtime_sec = time.time() - task["started_at"]
-            self.completed_count += 1
-            self.total_runtime_sec += runtime_sec
-            self.max_runtime_sec = max(self.max_runtime_sec, runtime_sec)
+            runtime_sec = time.time() - batch_start
+            for t, raw_result, normalized, ack, error_text in zip(
+                batch_tasks, raw_results, normalized_results, acks, error_texts, strict=True
+            ):
+                self.completed_count += 1
+                self.total_runtime_sec += runtime_sec
+                self.max_runtime_sec = max(self.max_runtime_sec, runtime_sec)
+                self.result_queue.put(
+                    {
+                        "track_id": str(t["track_id"]),
+                        "dispatch_frame_id": int(t["dispatch_frame_id"]),
+                        "submitted_at": float(t["submitted_at"]),
+                        "prompt": t["prompt_text"],
+                        "raw_result": raw_result,
+                        "normalized_result": normalized,
+                        "ack": ack,
+                        "runtime_sec": runtime_sec,
+                        "error_text": error_text,
+                        "query_type": t["query_type"],
+                    }
+                )
+            self.active_task = None
 
+    def _spill_task(self, task: dict[str, Any]) -> None:
+        try:
+            crop_pkg = task.get("vlm_crop_pkg")
+            crop_img = crop_pkg.vlm_frame_cropper_layer_image if crop_pkg is not None else None
+            encoded = encode_crop_image_to_png_base64(crop_img) if crop_img is not None else ""
+            append_deferred_task(
+                self.spill_queue_path,
+                DeferredVLMTask(
+                    track_id=str(task.get("track_id", "")),
+                    dispatch_frame_id=int(task.get("dispatch_frame_id", -1)),
+                    query_type=str(task.get("query_type", "")),
+                    prompt_text=str(task.get("prompt_text", "")),
+                    crop_png_base64=encoded,
+                    bbox=getattr(crop_pkg, "vlm_frame_cropper_layer_bbox", None) if crop_pkg is not None else None,
+                    created_at_unix_s=float(task.get("submitted_at", time.time())),
+                ),
+            )
+            self.spilled_count += 1
+            ack = build_vlm_ack_package(str(task.get("track_id", "")), "accepted", "deferred_spill_to_queue", False)
             self.result_queue.put(
                 {
-                    "track_id": str(task["track_id"]),
-                    "dispatch_frame_id": int(task["dispatch_frame_id"]),
-                    "submitted_at": float(task["submitted_at"]),
-                    "prompt": task["prompt_text"],
-                    "raw_result": raw_result,
-                    "normalized_result": normalized,
+                    "track_id": str(task.get("track_id", "")),
+                    "dispatch_frame_id": int(task.get("dispatch_frame_id", -1)),
+                    "submitted_at": float(task.get("submitted_at", time.time())),
+                    "prompt": str(task.get("prompt_text", "")),
+                    "raw_result": None,
+                    "normalized_result": None,
                     "ack": ack,
-                    "runtime_sec": runtime_sec,
-                    "error_text": error_text,
-                    "query_type": task["query_type"],
+                    "runtime_sec": 0.0,
+                    "error_text": "deferred_spill_to_queue",
+                    "query_type": str(task.get("query_type", "")),
                 }
             )
-            self.active_task = None
+        except Exception as exc:
+            self.spill_errors += 1
+            raise RuntimeError(f"Failed to spill deferred VLM task: {exc}") from exc
 
 
 def overlay_async_status(canvas, worker_status: dict[str, Any], current_frame_id: int) -> None:
     x = canvas.shape[1] - 310
     y = 16
-    cv2.rectangle(canvas, (x, y), (canvas.shape[1] - 14, y + 114), (25, 25, 32), -1)
+    cv2.rectangle(canvas, (x, y), (canvas.shape[1] - 14, y + 134), (25, 25, 32), -1)
     draw_text(canvas, "ASYNC VLM STATUS", x + 10, y + 22, scale=0.42)
     lines = [
         f"queue={worker_status['queue_size']}  busy={worker_status['busy']}",
+        f"batch={worker_status.get('batch_size', 1)}  spilled={worker_status.get('spilled_count', 0)}",
         f"active_track={worker_status['active_track_id'] or 'none'}",
         f"active_elapsed={worker_status['active_elapsed_sec']:.1f}s",
         f"completed={worker_status['completed_count']} avg={worker_status['avg_runtime_sec']:.2f}s max={worker_status['max_runtime_sec']:.2f}s",
@@ -212,6 +300,9 @@ def main() -> None:
     parser.add_argument("--show", action="store_true")
     parser.add_argument("--output", default="", help="Optional output video path")
     parser.add_argument("--max-queue-size", type=int, default=64)
+    parser.add_argument("--vlm-batch-size", type=int, default=1, help="Micro-batch size for VLM worker (1 disables batching).")
+    parser.add_argument("--vlm-batch-wait-ms", type=int, default=20, help="Max wait to form a batch before running VLM.")
+    parser.add_argument("--vlm-spill-queue", default="", help="If set, overflow tasks spill to this JSONL path (cache-and-run).")
     parser.add_argument("--no-realtime-throttle", action="store_true", help="Run as fast as possible instead of pacing to source FPS")
     args = parser.parse_args()
 
@@ -247,7 +338,14 @@ def main() -> None:
     initialize_tracking_layer(frame_rate=int(fps))
     crop_cache_state = initialize_vlm_crop_cache(defaults["vlm_crop_cache_size"], defaults["vlm_dead_after_lost_frames"])
     initialize_vehicle_state_layer(prune_after_lost_frames=None)
-    worker = AsyncVLMWorker(vlm_state=vlm_state, feedback_enabled=bool(defaults["vlm_crop_feedback_enabled"]), max_queue_size=args.max_queue_size)
+    worker = AsyncVLMWorker(
+        vlm_state=vlm_state,
+        feedback_enabled=bool(defaults["vlm_crop_feedback_enabled"]),
+        max_queue_size=args.max_queue_size,
+        batch_size=args.vlm_batch_size,
+        batch_wait_ms=args.vlm_batch_wait_ms,
+        spill_queue_path=args.vlm_spill_queue,
+    )
     worker.start()
 
     debug_state: dict[str, dict[str, Any]] = {}
