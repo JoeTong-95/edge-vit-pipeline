@@ -47,6 +47,11 @@ BENCH_OVERRIDE_ROI_ENABLED: bool | None = None
 # When set, this should be a repo-relative path like "data/sample1.mp4" or an absolute path.
 BENCH_OVERRIDE_INPUT_PATH: str | None = None
 
+# Optional VLM micro-batch size for benchmarking.
+# - 1 preserves the original synchronous behavior (one dispatch per frame at most).
+# - >1 will execute up to this many dispatches per frame as a single batched VLM call.
+BENCH_VLM_BATCH_SIZE = 1
+
 # Fallback (frame-count mode). Used only if MEASURE_SECONDS <= 0.
 WARMUP_FRAMES = 3
 MEASURED_FRAMES = 30
@@ -188,6 +193,8 @@ def main() -> None:
     _p("scene_enabled", str(scene_enabled and scene_available))
     _p("vlm_enabled", str(vlm_enabled))
     _p("vlm_model", _resolve_repo_path(vlm_model) if vlm_model else "none")
+    if vlm_enabled:
+        _p("vlm_benchmark_batch_size", str(int(BENCH_VLM_BATCH_SIZE)))
     if use_time_budget:
         _p("warmup_seconds", f"{warmup_seconds:.1f}")
         _p("measure_seconds", f"{measure_seconds:.1f}")
@@ -234,7 +241,7 @@ def main() -> None:
                 VLMFrameCropperLayerPackage,
                 build_vlm_ack_package_from_result,
                 initialize_vlm_layer,
-                run_vlm_inference,
+                run_vlm_inference_batch,
             )
 
             vlm_state = initialize_vlm_layer(
@@ -415,25 +422,37 @@ def main() -> None:
                     f"profile_tracking_status:{row['status']}",
                 )
 
+            dispatch_pkgs: list[VLMFrameCropperLayerPackage] = []
+            batch_size = max(1, int(BENCH_VLM_BATCH_SIZE))
             for tid in sorted(crop_cache["track_caches"].keys(), key=lambda x: (len(str(x)), str(x))):
                 dispatch = build_vlm_dispatch_package(crop_cache, tid)
                 if dispatch is None:
                     continue
                 inner = dispatch["vlm_frame_cropper_layer_package"]
-                vlm_crop_pkg = VLMFrameCropperLayerPackage(
-                    vlm_frame_cropper_layer_track_id=str(inner["vlm_frame_cropper_layer_track_id"]),
-                    vlm_frame_cropper_layer_image=inner["vlm_frame_cropper_layer_image"],
-                    vlm_frame_cropper_layer_bbox=tuple(int(x) for x in inner["vlm_frame_cropper_layer_bbox"]),
+                dispatch_pkgs.append(
+                    VLMFrameCropperLayerPackage(
+                        vlm_frame_cropper_layer_track_id=str(inner["vlm_frame_cropper_layer_track_id"]),
+                        vlm_frame_cropper_layer_image=inner["vlm_frame_cropper_layer_image"],
+                        vlm_frame_cropper_layer_bbox=tuple(int(x) for x in inner["vlm_frame_cropper_layer_bbox"]),
+                    )
                 )
+                if len(dispatch_pkgs) >= batch_size:
+                    break
+
+            if dispatch_pkgs:
                 q0 = time.perf_counter()
-                raw_result = run_vlm_inference(vlm_state, vlm_crop_pkg, vlm_query_type)
+                raw_results = run_vlm_inference_batch(
+                    vlm_state,
+                    dispatch_pkgs,
+                    [vlm_query_type] * len(dispatch_pkgs),
+                )
                 q1 = time.perf_counter()
                 vlm_query_s_total += q1 - q0
-                vlm_query_count += 1
-                ack = build_vlm_ack_package_from_result(raw_result)
-                register_vlm_ack_package(crop_cache, ack)
-                vlm_calls += 1
-                break
+                vlm_query_count += len(raw_results)
+                for raw_result in raw_results:
+                    ack = build_vlm_ack_package_from_result(raw_result)
+                    register_vlm_ack_package(crop_cache, ack)
+                vlm_calls += len(raw_results)
         t_v1 = time.perf_counter()
 
         t_sc0 = time.perf_counter()
@@ -626,7 +645,9 @@ def main() -> None:
         if calls_per_s > 0:
             target_ms = (1.0 / calls_per_s) * 1000.0
             print(f"- observed_dispatch_rate: {calls_per_s:.3f} calls/sec")
-            print(f"- target_vlm_query_time_to_keep_up: <= {target_ms:.0f} ms/query at this dispatch rate (single-thread, synchronous)")
+            batch_size = max(1, int(BENCH_VLM_BATCH_SIZE))
+            note = "batched" if batch_size > 1 else "single-thread, synchronous"
+            print(f"- target_vlm_query_time_to_keep_up: <= {target_ms:.0f} ms/query at this dispatch rate ({note})")
         print(
             "- interpretation: if you only need small JSON, reduce max_new_tokens/prompt length; "
             "for smooth real-time capture, run VLM async or keep dispatch_rate low enough that it never blocks the frame loop."
