@@ -51,6 +51,68 @@ python demo_evaluation_output.py
 
 It prints one JSON line and writes `evaluation_demo.sqlite` in the same directory.
 
+## Device capability profiling (video-only, end-to-end)
+
+To get a practical sense of whether a machine can run this software stack, use:
+
+- `benchmark.py`
+
+This script reads `src/configuration-layer/config.yaml` and runs a short video-only pass through:
+
+`input(video) -> ROI (if enabled) -> YOLO -> tracking -> vehicle-state -> cropper dispatch -> (optional) VLM inference -> (optional) scene awareness`
+
+It prints:
+- per-stage average milliseconds
+- average end-to-end ms and estimated FPS
+- average detections/tracks per frame
+- average VLM calls per frame
+ - a layer-by-layer summary (ROI/YOLO/VLM) including interpreted capacity vs the video source FPS
+ - a VLM dispatch-rate-based target query-time hint (how fast VLM must be to keep up with the observed calls/sec)
+
+### Note on "fast path" vs CUDA
+
+If you see logs like "fast path is not available ... falling back to torch implementation", CUDA is still being used,
+but the model is missing optional optimized attention / kernel implementations. This can materially slow down VLM
+inference even on a GPU.
+
+### Run (cross-platform)
+
+From repo root:
+
+```bash
+python src/evaluation-output-layer/benchmark.py
+```
+
+### Run a steady-state benchmark (recommended)
+
+Warm up (skip cold performance) and then measure for 60 seconds.
+
+Edit the control values at the top of:
+
+- `src/evaluation-output-layer/benchmark.py`
+
+Defaults are `WARMUP_SECONDS=10` and `MEASURE_SECONDS=60`, so you can just run:
+
+```bash
+python src/evaluation-output-layer/benchmark.py
+```
+
+### Windows 11 wrapper (system info + pipeline profile)
+
+From repo root (PowerShell):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File src/evaluation-output-layer/profile_device_win11.ps1
+```
+
+### Linux wrapper (system info + pipeline profile)
+
+From repo root:
+
+```bash
+bash src/evaluation-output-layer/profile_device_linux.sh
+```
+
 ## Evaluation Output Layer (Layer 10)
 
 This layer collects lightweight benchmarking / debug telemetry and emits it to a sink.
