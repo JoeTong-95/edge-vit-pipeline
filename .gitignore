@@ -1,5 +1,12 @@
 chat-history/
 
+# Generated Python cache files
+__pycache__/
+*.py[cod]
+
+# Local sample videos and rendered visualizations
+data/*.mp4
+
 # Model weights and checkpoints
 *.pt
 *.pth
