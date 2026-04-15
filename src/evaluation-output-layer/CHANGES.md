@@ -13,3 +13,5 @@
     - `roi_benchmark_matrix.py` (short ROI on/off runs across sample videos)
   - Improved YOLO timing clarity by splitting inference vs post-processing timing, and by reporting pre/post ROI frame counts.
 
+- Updated `benchmark.py` VLM timing to support optional micro-batching via `BENCH_VLM_BATCH_SIZE` (defaults to 1, preserving the original behavior).
+
