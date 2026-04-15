@@ -44,6 +44,7 @@ from layer import (
     normalize_vlm_result,
     prepare_vlm_prompt,
     run_vlm_inference,
+    run_vlm_inference_batch,
 )
 from tracker import assign_tracking_status, build_tracking_layer_package, initialize_tracking_layer, update_tracks
 from vehicle_state_layer import (
