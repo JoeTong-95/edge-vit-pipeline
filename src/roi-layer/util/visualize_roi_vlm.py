@@ -116,6 +116,15 @@ def probe_video_metadata(input_source: str, input_path: str, frame_resolution: t
     return fps, width, height
 
 
+def maybe_sleep_to_source_fps(start_wall: float, frame_id: int, fps: float) -> None:
+    if fps <= 0:
+        return
+    target_elapsed = frame_id / fps
+    sleep_sec = target_elapsed - (time.time() - start_wall)
+    if sleep_sec > 0:
+        time.sleep(sleep_sec)
+
+
 def input_package_to_dict(package: Any) -> dict[str, Any]:
     return {
         "input_layer_frame_id": package.input_layer_frame_id,
@@ -328,6 +337,12 @@ def main() -> None:
     parser.add_argument("--max-frames", type=int, default=0)
     parser.add_argument("--show", action="store_true")
     parser.add_argument("--output", default=defaults["output"], help="Optional output video path")
+    parser.add_argument(
+        "--no-realtime-throttle",
+        action="store_true",
+        default=False,
+        help="Run as fast as possible instead of pacing the display/output to the source FPS.",
+    )
     args = parser.parse_args()
 
     frame_resolution = tuple(defaults["frame_resolution"])
@@ -440,7 +455,8 @@ def main() -> None:
                         last_vlm_frame_id = input_package.input_layer_frame_id
 
             elapsed = time.time() - start_time
-            fps_text = input_package.input_layer_frame_id / elapsed if elapsed > 0 else 0.0
+            processing_fps = input_package.input_layer_frame_id / elapsed if elapsed > 0 else 0.0
+            fps_text = fps if not args.no_realtime_throttle and fps > 0 else processing_fps
             draw_text_block(
                 annotated,
                 [
@@ -448,7 +464,7 @@ def main() -> None:
                     f"ROI locked: {roi_pkg['roi_layer_locked']}",
                     f"Threshold: {args.roi_threshold}",
                     f"VLM every N: {max(1, int(args.vlm_every_n_frames))}",
-                    f"FPS: {fps_text:.1f}",
+                    f"Feed FPS: {fps_text:.1f}",
                 ],
                 (12, 24),
                 scale=0.40,
@@ -477,6 +493,8 @@ def main() -> None:
                     break
             if args.max_frames > 0 and input_package.input_layer_frame_id >= args.max_frames:
                 break
+            if not args.no_realtime_throttle:
+                maybe_sleep_to_source_fps(start_time, input_package.input_layer_frame_id, fps)
     finally:
         input_layer.close_input_layer()
         if out is not None:

@@ -22,6 +22,7 @@ These scripts are helpers around the layer APIs, not replacements for the layer 
 - `src/tracking-layer/util/visualize_tracking.py`: config-driven YOLO plus tracking visualization with optional live preview, optional video output, and optional SQLite metrics.
 - `src/roi-layer/util/visualize_roi.py`: config-driven ROI discovery visualization with optional live preview and optional video output.
 - `src/roi-layer/util/visualize_roi_vlm.py`: calibrates ROI from full-frame detections first, then after ROI lock runs YOLO and VLM only inside the ROI crop and shows the selected ROI-local crop sent to VLM.
+- `src/roi-layer/util/visualize_roi_vlm_upson.py`: clip-specific Upson helper; runs the richer ROI -> tracking -> cropper -> VLM path from `0:48` to `1:48`, keeps playback paced to source FPS by default, and keeps the left display anchored to the original full-frame aspect ratio after ROI lock.
 - `src/vlm-frame-cropper-layer/util/visualize_vlm_frame_cropper.py`: config-driven crop-cache visualization showing per-track crop history and the current crop selected for VLM input.
 - `src/vlm-layer/util/visualize_vlm.py`: end-to-end orchestration visualizer (input → YOLO → tracking → cropper cache/dispatch → VLM inference) with structured prompt preview, raw response, and ack/retry logging; reads `config.yaml` like the other helpers.
 - `src/vlm-layer/util/visualize_vlm_roi.py`: calibrates ROI first, then runs the downstream tracking -> cropper cache/selection -> VLM loop only inside the locked ROI crop.
@@ -65,7 +66,7 @@ A few config values are especially important for the optional VLM path:
 
 1. Start with `pipeline_layers_and_interactions.md` when deciding whether a layer interface is correct.
 2. Use the layer-local README files for runnable examples and practical commands.
-3. For current YOLO detector tag policy, read `src/yolo-layer/TAG_FILTER_BEHAVIOR.md`. That document explains which COCO labels are forwarded downstream right now and notes that editing `src/yolo-layer/class_map.py` changes the Python pipeline's detector behavior.
+3. For current YOLO detector tag policy, read `src/yolo-layer/TAG_FILTER_BEHAVIOR.md`. That document explains which detector labels are forwarded downstream right now and notes that editing `src/yolo-layer/class_map.py` changes the Python pipeline's detector behavior.
 4. Treat helper scripts as orchestration utilities that must stay compatible with the pipeline contract.
 ## VLM Ack Loop
 
@@ -123,6 +124,12 @@ The current target-label gate also adds a terminal split:
 ## 2026-04-15
 
 - Added `pipeline/benchmark.py` (moved from `src/evaluation-output-layer/benchmark.py`): video-only end-to-end profiler that reads `src/configuration-layer/config.yaml`. ROI-specific matrix helpers live under `src/roi-layer/test/`.
+
+## 2026-04-16
+
+- Updated `benchmark.py` path setup so `config_vlm_runtime_mode=async` can import `AsyncVLMWorker` from `src/vlm-layer/util/visualize_vlm_realtime.py` instead of silently dropping to inline mode because of a local import failure.
+- Added `src/roi-layer/util/visualize_roi_vlm_upson.py` as the clip-specific Upson ROI/VLM helper for the `0:48` to `1:48` demo window.
+- Updated the pipeline-level helper list and detector-policy wording so the docs no longer imply the active YOLO filter is always COCO-style.
 
 ## 2026-04-11
 

@@ -19,7 +19,7 @@ Common fields:
 - `config_input_source`: `video` or `camera`
 - `config_input_path`: video path when source is `video`
 - `config_device`: `cpu` or `cuda`
-- `config_yolo_model`: bundled model such as `yolov8n.pt`, `yolov10n.pt`, or `yolo11n.pt`
+- `config_yolo_model`: bundled model such as `yolov8n.pt`, `yolov10n.pt`, `yolov11n.pt`, or `yolov11v28_jingtao.pt`
 - `config_yolo_confidence_threshold`: detection confidence threshold
 - `config_frame_resolution`: target frame size metadata
 - `config_vlm_enabled`: run VLM inference paths when true (requires PyTorch, `transformers`, and a valid `config_vlm_model` path)
@@ -57,13 +57,14 @@ model_name = get_config_value(config, "config_yolo_model")
 
 - `src/yolo-layer/util/visualize_yolo.py`: YOLO-only (no tracking); draws detections on the input stream.
 - `src/tracking-layer/util/visualize_tracking.py`: YOLO + tracking; draws track IDs / statuses on the input stream.
-- `src/roi-layer/visualize_roi.py`: ROI discovery + lock visualization; shows the active cropped region.
+- `src/roi-layer/util/visualize_roi.py`: ROI discovery + lock visualization; shows the active cropped region.
 - `src/vlm-frame-cropper-layer/util/visualize_vlm_frame_cropper.py`: Crop-cache visualization; shows per-track candidate crops and when a track becomes dispatchable/dead.
 - `src/vlm-layer/util/visualize_vlm.py`: End-to-end cropper → VLM → ack loop for a single focus track (blocking / inline VLM).
 - `src/vlm-layer/util/visualize_vlm_realtime.py`: End-to-end VLM loop with a background VLM worker (async); can also run in spill mode to write overflow to `config_vlm_worker_spill_queue_path`.
 - `src/vlm-layer/util/visualize_vlm_roi.py`: ROI calibration first, then run YOLO+tracking+cropper+VLM only inside the locked ROI (blocking / inline VLM).
 - `src/vlm-layer/util/visualize_vlm_roi_realtime.py`: ROI calibration first, then ROI-cropped realtime async VLM loop (background worker).
-- `src/roi-layer/visualize_roi_vlm.py`: ROI calibration first, then run YOLO + VLM inside the locked ROI (no full tracking UI; simpler ROI+VLM demo).
+- `src/roi-layer/util/visualize_roi_vlm.py`: ROI calibration first, then run YOLO + VLM inside the locked ROI (no full tracking UI; simpler ROI+VLM demo).
+- `src/roi-layer/util/visualize_roi_vlm_upson.py`: clip-specific Upson helper that uses the richer ROI -> tracking -> cropper -> VLM UI, starts at `0:48`, ends at `1:48`, and paces playback to the source FPS by default.
 - `src/tracking-layer/util/automated_evaluation.py`: headless evaluation run (writes metrics/artifacts; no visualization UI).
 
 These scripts read from `config.yaml` by default and let CLI arguments override specific values.
@@ -76,6 +77,12 @@ These scripts read from `config.yaml` by default and let CLI arguments override 
 - Updated defaults / schema / types / normalizer / validator so these knobs are available everywhere that reads `config.yaml`.
 - Updated `config.yaml` and `README.md` to document and expose the new knobs for benchmark + realtime VLM tools.
 - `config_vlm_spill_max_file_mb` caps the active spill JSONL size by rotating to a sibling `*.jsonl.rotated.<ms>` file (delete or archive rotated files separately for 24/7 deployments).
+
+## 2026-04-16
+
+- Updated the documented bundled YOLO choices to include `yolov11v28_jingtao.pt`.
+- Documented `src/roi-layer/util/visualize_roi_vlm_upson.py` as the clip-specific Upson ROI/VLM helper.
+- `benchmark.py` now resolves `src/vlm-layer/util/` as well, so `config_vlm_runtime_mode=async` can initialize `AsyncVLMWorker` instead of falling back to inline because of an import miss.
 
 ## 2026-04-10
 
