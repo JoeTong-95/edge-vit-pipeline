@@ -162,13 +162,13 @@ run-smoke-test.bat
 Or directly:
 
 ```powershell
-python smoke_test.py
+python src/vlm-layer/test/smoke_test.py
 ```
 
 To print sample JSON strings only, without loading the model:
 
 ```powershell
-python smoke_test.py --sample-only
+python src/vlm-layer/test/smoke_test.py --sample-only
 python layer.py
 ```
 
@@ -181,17 +181,17 @@ E:\OneDrive\desktop\01_2026_Projects\01_2026_Cornell_26_Spring\MAE_4221_IoT\Desi
 To override the directory for the smoke test:
 
 ```powershell
-python smoke_test.py --sample-only --output-dir path\to\folder
-python smoke_test.py --output-dir path\to\folder
+python src/vlm-layer/test/smoke_test.py --sample-only
+python src/vlm-layer/test/smoke_test.py --output-dir path\to\folder
 ```
 
 Useful options:
 
 ```powershell
-python smoke_test.py --device cpu
-python smoke_test.py --track-id demo-123
-python smoke_test.py --query-type vehicle_class_only_v1
-python smoke_test.py --disabled
+python src/vlm-layer/test/smoke_test.py --device cpu
+python src/vlm-layer/test/smoke_test.py --track-id demo-123
+python src/vlm-layer/test/smoke_test.py --query-type vehicle_class_only_v1
+python src/vlm-layer/test/smoke_test.py --disabled
 ```
 
 The smoke test does not depend on the upstream cropper layer. It builds a burner cropper package locally from `truckimage.png` so you can verify this layer in isolation.
@@ -205,25 +205,25 @@ Use this quick guide:
   - does **not** run the real pipeline
   - does **not** use `config.yaml`
 
-- `python src/vlm-layer/smoke_test.py --sample-only`
+- `python src/vlm-layer/test/smoke_test.py --sample-only`
   - use when you want the same built-in sample outputs, but through the smoke-test wrapper
   - does **not** run the real pipeline
   - does **not** use `config.yaml`
 
-- `python src/vlm-layer/smoke_test.py`
+- `python src/vlm-layer/test/smoke_test.py`
   - use when you want one direct VLM inference on `truckimage.png`
   - initializes the real model
   - does **not** run YOLO, tracking, or cropper cache logic
   - does **not** use `config.yaml`
 
-- `python src/vlm-layer/run_config_vlm_once.py`
+- `python src/vlm-layer/test/run_config_vlm_once.py`
   - use when you want the **real config-driven pipeline**
   - this is the file I ran for the actual test
   - reads `src/configuration-layer/config.yaml`
   - runs input -> YOLO -> tracking -> cropper -> VLM
   - saves the actual crop, actual prompt, and actual VLM response
 
-- `python src/vlm-layer/visualize_vlm.py --show`
+- `python src/vlm-layer/util/visualize_vlm.py --show`
   - use when you want the real pipeline plus a live visual debug window
   - best for stepping through behavior interactively
 
@@ -236,16 +236,16 @@ These commands use `src/configuration-layer/config.yaml`.
 Runs until the first real crop is dispatched to VLM, then saves one debug image.
 
 ```powershell
-python src/vlm-layer/run_config_vlm_once.py --target-ids 1
+python src/vlm-layer/test/run_config_vlm_once.py --target-ids 1
 ```
 
 Useful options:
 
 ```powershell
-python src/vlm-layer/run_config_vlm_once.py --target-ids 1 --device-override cpu
-python src/vlm-layer/run_config_vlm_once.py --target-ids 1 --vlm-device-override cpu
-python src/vlm-layer/run_config_vlm_once.py --target-ids 1 --max-frames 1000
-python src/vlm-layer/run_config_vlm_once.py --target-ids 1 --output-dir path\to\folder
+python src/vlm-layer/test/run_config_vlm_once.py --target-ids 1 --device-override cpu
+python src/vlm-layer/test/run_config_vlm_once.py --target-ids 1 --vlm-device-override cpu
+python src/vlm-layer/test/run_config_vlm_once.py --target-ids 1 --max-frames 1000
+python src/vlm-layer/test/run_config_vlm_once.py --target-ids 1 --output-dir path\to\folder
 ```
 
 ### 2. Collect Multiple Real VLM IDs
@@ -253,15 +253,15 @@ python src/vlm-layer/run_config_vlm_once.py --target-ids 1 --output-dir path\to\
 Runs the real pipeline and saves one debug image per unique VLM-dispatched track ID.
 
 ```powershell
-python src/vlm-layer/run_config_vlm_once.py --target-ids 15
+python src/vlm-layer/test/run_config_vlm_once.py --target-ids 15
 ```
 
 Useful options:
 
 ```powershell
-python src/vlm-layer/run_config_vlm_once.py --target-ids 5
-python src/vlm-layer/run_config_vlm_once.py --target-ids 20 --max-frames 10000
-python src/vlm-layer/run_config_vlm_once.py --target-ids 15 --output-dir path\to\folder
+python src/vlm-layer/test/run_config_vlm_once.py --target-ids 5
+python src/vlm-layer/test/run_config_vlm_once.py --target-ids 20 --max-frames 10000
+python src/vlm-layer/test/run_config_vlm_once.py --target-ids 15 --output-dir path\to\folder
 ```
 
 Notes:
@@ -278,8 +278,8 @@ Notes:
 ### 3. Live Visual Debugging
 
 ```powershell
-python src/vlm-layer/visualize_vlm.py --show
-python src/vlm-layer/visualize_vlm.py --output data/vlm_visualization.mp4
+python src/vlm-layer/util/visualize_vlm.py --show
+python src/vlm-layer/util/visualize_vlm.py --output data/vlm_visualization.mp4
 ```
 
 Use this when you want to inspect:
@@ -295,12 +295,12 @@ Use this when you want to inspect:
 From the repo root (requires the same runtime as smoke inference: PyTorch, `transformers`, local model path in `config.yaml`):
 
 ```powershell
-python src/vlm-layer/visualize_vlm.py --show
-python src/vlm-layer/visualize_vlm_roi.py --show
-python src/vlm-layer/visualize_vlm_realtime.py --show
-python src/vlm-layer/visualize_vlm_roi_realtime.py --show
-python src/vlm-layer/visualize_vlm.py --output data/vlm_visualization.mp4
-python src/vlm-layer/visualize_vlm_realtime.py --show --max-queue-size 128
+python src/vlm-layer/util/visualize_vlm.py --show
+python src/vlm-layer/util/visualize_vlm_roi.py --show
+python src/vlm-layer/util/visualize_vlm_realtime.py --show
+python src/vlm-layer/util/visualize_vlm_roi_realtime.py --show
+python src/vlm-layer/util/visualize_vlm.py --output data/vlm_visualization.mp4
+python src/vlm-layer/util/visualize_vlm_realtime.py --show --max-queue-size 128
 ```
 
 ## Runtime Requirements
@@ -389,3 +389,78 @@ The visualizer also uses a single-shot query when the cropper dispatches a
 `dead_best_available` package after a track stays lost for
 `config_vlm_dead_after_lost_frames`. That gives one last best-effort answer for
 an incomplete cache round instead of dropping the track entirely.
+
+## Changes
+
+Layer changes in this branch
+
+- Added `measure_vlm_modes.py`: one figure with three mode clusters × four sample videos (`data/sample1.mp4`–`sample4.mp4` by default) + JSON; does not use `benchmark.py`; default output `E:\OneDrive\desktop\vlm-layer`. One VLM load shared across runs.
+
+- Spill queue JSONL: optional size-based rotation before each append (`config_vlm_spill_max_file_mb` → `maybe_rotate_spill_file` in `vlm_deferred_queue.py`; `visualize_vlm_realtime.AsyncVLMWorker` passes the byte limit). Rotated files are named `*.jsonl.rotated.<ms>` next to the active file.
+
+- Simplified the active VLM prompt contract to a short rigid JSON-only format:
+  first answer whether the crop matches an active YOLO label such as `truck`
+  or `bus`, then if yes return only numeric `wheel_count`,
+  numeric `estimated_weight_kg`, `ack_status`, and `retry_reasons`.
+- Removed `vlm_image_quality_notes` from the active VLM contract and kept
+  `retry_reasons` as the only structured explanation for bad crops such as
+  `occluded` or `bad_angle`.
+- Stopped asking the model for `truck_type` and prompt-side `confidence` in the
+  active contract.
+- Added `run_config_vlm_once.py` as the real config-driven runner for:
+  `input -> YOLO -> tracking -> cropper -> VLM`.
+- Added saved debug-image generation for both sample outputs and real
+  config-driven VLM runs.
+- Iterated the saved debug-image layout during this session:
+  dark theme, larger fonts, top-row crop preview, and simplified displayed
+  fields (`track id`, `model id`, prompt, actual VLM output).
+- Updated parsing defaults so numeric fields now fall back to `0` instead of
+  string `unknown` in the active prompt/JSON path.
+
+- Added `VLMAckPackage`, `build_vlm_ack_package`, and `serialize_vlm_ack_package` so the VLM layer can explicitly acknowledge whether a dispatched crop was accepted, needs retry, or should be finalized with the current best crop.
+- Documented the VLM layer's acknowledgement role in the layer README so it is clear how this layer now participates in the one-shot dispatch loop.
+- Added `preview_vlm_applied_prompt` for visualization/debug of the processor chat-template string.
+- Added `visualize_vlm.py`: three-column view (raw+tracks, cropper cache/selection, dispatch/VLM prompt/response/ack log) wired to real collect→dispatch→infer→ack loop.
+- Updated `README.md` with relative links to pipeline docs, `visualize_vlm.py` usage, `preview_vlm_applied_prompt`, and orchestration scope notes.
+- Raised minimum `transformers` to **5.x** for Qwen3.5 (`qwen3_5`): `initialize_vlm_layer` now fails fast with an upgrade hint on 4.x, and docker requirement pins use `transformers>=5.0.0,<6.0.0`.
+- `visualize_vlm.py`: tighter crop-cache column width via `crop_cache_panel_width_unscaled`, default wider dispatch column (640px), `--right-panel-width`, and `np.hstack` layout so columns sit flush without dead space.
+
+- Added a VLM loop visualizer view that shows the selected crop, the last image actually sent to VLM, the acknowledgement decision, and whether metadata was accepted or a retry round is being collected.
+- Moved accept-vs-retry judgement into the VLM output contract itself: `vehicle_semantics_v1` now returns structured JSON with `ack_status`, retry reasons like `occluded` or `bad_angle`, and the semantic classification fields when the image is good enough.
+- Added config-driven single-shot mode via `config_vlm_crop_feedback_enabled=false`, so one dispatched crop can produce final JSON classification and permanently skip further cropper/VLM work for that track.
+- Removed the catch-all retry reason `other` from the VLM schema, parser fallbacks, and visualizer summaries so retry messages stay explicit and actionable.
+- Narrowed retry reasons to only `occluded` or `bad_angle` across the prompt, parser, and visualizer fallbacks.
+- Added `visualize_vlm_realtime.py`, a non-blocking helper that keeps the feed moving while VLM inference runs on a background worker so queue lag and throughput can be inspected.
+
+## 2026-04-10
+
+- Added explicit truck gate semantics to the VLM normalization and ack path:
+  `is_truck=false` now returns an accepted `not_truck` acknowledgement so
+  downstream state can mark the track `dead`.
+- Updated the visualizer orchestration so cropper dispatch mode
+  `dead_best_available` uses a single-shot truck check and still produces a
+  final VLM decision for incomplete cache rounds that ended in a dead track.
+- Updated VLM visual debug state so terminal tracks are shown as `dead` or
+  `done` instead of the older generic progressed wording.
+- Updated the rejection path to use acknowledgement reason `no`, so VLM
+  rejection of the currently flagged labels is distinct from cropper-side
+  `dead` caused by the lost threshold.
+- Added `visualize_vlm_roi.py`, a cross-layer helper that shows ROI
+  calibration first and then runs the tracking -> cropper selection -> VLM
+  sequence inside the locked ROI crop.
+- Added `visualize_vlm_roi_realtime.py`, an async ROI-integrated helper that
+  keeps the feed moving after ROI lock while VLM inference runs in a background
+  worker.
+
+## 2026-04-15
+
+- Added true batched VLM inference helpers: `infer_vlm_semantics_batch` and
+  `run_vlm_inference_batch`, enabling multi-crop micro-batching via a single
+  `model.generate(...)` call.
+- Updated `visualize_vlm_realtime.py` async VLM worker to support micro-batching
+  (`--vlm-batch-size`, `--vlm-batch-wait-ms`) and optional overflow
+  spill-to-disk queue (`--vlm-spill-queue`) for a cache-and-run workflow.
+- Added `vlm_deferred_queue.py` and `run_deferred_vlm_queue.py` to persist crop
+  tasks as JSONL (PNG base64) and process them offline later.
+- Added `VLM_OPTIMIZATION_NOTES.md` documenting realtime vs cache-and-run modes,
+  and how to run both.

@@ -1203,11 +1203,6 @@ __all__ = [
 
 
 if __name__ == "__main__":
-    sample_image = Image.open(LAYER_DIR / "truckimage.png").convert("RGB")
-    saved_paths = save_sample_vlm_output_debug_images(sample_image=sample_image)
     for sample_json in build_sample_vlm_output_json_strings():
         print(sample_json)
         print()
-    print("Saved sample debug images:")
-    for saved_path in saved_paths:
-        print(saved_path)

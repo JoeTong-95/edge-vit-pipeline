@@ -3,7 +3,7 @@ from __future__ import annotations
 DEFAULT_CONFIG_VALUES = {
     "config_device": "cpu",
     "config_input_source": "video",
-    "config_input_path": "data/sample.mp4",
+    "config_input_path": "data/sample3.mp4",
     "config_frame_resolution": (640, 480),
     "config_roi_enabled": False,
     "config_roi_vehicle_count_threshold": 5,
