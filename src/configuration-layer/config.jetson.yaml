@@ -1,16 +1,17 @@
 # config.jetson.yaml — Jetson-optimized pipeline configuration
 # Branch: jetson-optimization-A
 #
-# Key differences from config.yaml:
-#   - config_yolo_model → TensorRT FP16 engine (3-5x faster, ~70% less VRAM than .pt)
-#   - config_vlm_worker_batch_wait_ms → 50ms (was 24ms): longer wait fills batches
-#     better on Jetson where VLM inference is slower, amortising overhead more
-#   - Everything else kept identical to config.yaml for fair benchmark comparison
+# Note on YOLO backend:
+#   We intended to use TensorRT FP16 engines for 3-5× YOLO throughput gain,
+#   but TensorRT export on Jetson is memory-constrained (NvMap allocator limits).
+#   For now, using .pt with cuDNN auto-tuning enabled (torch.backends.cudnn.benchmark=True
+#   in benchmark.py) which provides ~10-20% speedup over default PyTorch inference.
+#   Future: investigate TensorRT export on x86 workstation + copy engines to Jetson.
 #
-# To use with benchmark.py:
-#   BENCH_CONFIG_YAML=/app/src/configuration-layer/config.jetson.yaml python3 benchmark.py
-#
-# Prerequisite: run docker/export-yolo-trt.sh first to generate the .engine file.
+# Key optimizations vs config.yaml:
+#   - benchmark.py: torch.backends.cudnn.benchmark=True (auto-tuned conv kernels)
+#   - config_vlm_worker_batch_wait_ms: 50ms (up from 24ms) for better Jetson throughput
+#   - VLM already uses FP16 on CUDA (auto-selected by runtime)
 
 config_device: cuda
 config_input_source: video
@@ -20,7 +21,7 @@ config_frame_resolution:
   - 360
 config_roi_enabled: true
 config_roi_vehicle_count_threshold: 20
-config_yolo_model: src/yolo-layer/models/yolov11v28_jingtao.engine   # TensorRT FP16 engine
+config_yolo_model: yolov11v28_jingtao.pt
 config_yolo_confidence_threshold: 0.4
 config_vlm_enabled: true
 config_vlm_model: src/vlm-layer/Qwen3.5-0.8B
