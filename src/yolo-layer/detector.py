@@ -33,6 +33,7 @@ _state = {
     "device": None,
     "default_imgsz": None,
     "half": False,
+    "is_trt": False,  # TRT engines have a fixed input shape; skip dynamic imgsz
     "initialized": False,
 }
 
@@ -73,6 +74,9 @@ def initialize_yolo_layer(model_name="yolov8n.pt", conf_threshold=0.25, device="
     # Use FP16 on CUDA: halves both weight and activation memory, which is
     # critical on Jetson where GPU memory must be shared with the VLM model.
     _state["half"] = device != "cpu"
+    # TRT engines are compiled for a fixed input shape; dynamic ROI imgsz is not
+    # supported and will raise an assertion error inside TRT inference.
+    _state["is_trt"] = str(resolved_model_name).endswith(".engine")
     _state["initialized"] = True
 
     print(f"[yolo_layer] Loaded model: {resolved_model_name}")
@@ -136,8 +140,12 @@ def run_yolo_detection(upstream_package):
     roi_enabled = bool(upstream_package.get("roi_layer_enabled", False))
     roi_locked = bool(upstream_package.get("roi_layer_locked", False))
     force_native_imgsz = bool(upstream_package.get("yolo_force_native_imgsz", False))
-    if force_native_imgsz or ("roi_layer_image" in upstream_package and roi_enabled and roi_locked):
-        model_kwargs["imgsz"] = _resolve_dynamic_roi_imgsz(image)
+    # TRT engines have a fixed compiled input shape — skip dynamic imgsz override.
+    # ROI cropping still reduces the spatial region passed to the engine, but the
+    # engine will letterbox/resize internally to its compiled 640×640 shape.
+    if not _state["is_trt"]:
+        if force_native_imgsz or ("roi_layer_image" in upstream_package and roi_enabled and roi_locked):
+            model_kwargs["imgsz"] = _resolve_dynamic_roi_imgsz(image)
 
     results = _state["model"](image, **model_kwargs)
 
