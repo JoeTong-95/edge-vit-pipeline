@@ -76,6 +76,15 @@ def normalize_config(raw_config: dict[str, Any]) -> ConfigurationLayerConfig:
             merged["config_vlm_realtime_throttle_enabled"],
             "config_vlm_realtime_throttle_enabled",
         ),
+        config_vlm_trt_vision_engine=(
+            None
+            if merged.get("config_vlm_trt_vision_engine") in {None, ""}
+            else str(merged["config_vlm_trt_vision_engine"]).strip()
+        ),
+        config_vlm_backend=str(merged.get("config_vlm_backend") or "pytorch").strip().lower(),
+        config_vlm_llamacpp_server_url=str(
+            merged.get("config_vlm_llamacpp_server_url") or "http://localhost:8080"
+        ).strip(),
         config_scene_awareness_enabled=_normalize_bool(
             merged["config_scene_awareness_enabled"],
             "config_scene_awareness_enabled",

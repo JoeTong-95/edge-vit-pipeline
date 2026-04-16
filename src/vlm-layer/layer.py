@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import base64
+import io
 import json
 import importlib.util
 import textwrap
+import urllib.error
+import urllib.request
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -36,11 +40,25 @@ def _set_decoder_only_processor_left_padding(processor: Any) -> None:
         tok.padding_side = "left"
 
 
+_ALLOWED_VLM_BACKENDS = {"pytorch", "llamacpp"}
+
+
 @dataclass(slots=True)
 class VLMConfig:
     config_vlm_enabled: bool = False
     config_vlm_model: str = str(DEFAULT_VLM_MODEL_PATH)
     config_device: str = "auto"
+    # Path to a pre-built TRT FP16 engine for the SigLIP vision encoder.
+    # None  → auto-discover: load  <model_dir>/vision_encoder_fp16.trt  if it exists.
+    # ""    → explicitly disabled even if the engine file exists.
+    # <str> → use this exact path.
+    config_vlm_trt_vision_engine: str | None = None
+    # Inference backend: "pytorch" (default) or "llamacpp".
+    # When "llamacpp", the pipeline calls a running llama-server HTTP API instead
+    # of loading a HuggingFace model in-process. Start the server separately with
+    # scripts/start_llamacpp_server.sh before launching the pipeline.
+    config_vlm_backend: str = "pytorch"
+    config_vlm_llamacpp_server_url: str = "http://localhost:8080"
 
 
 @dataclass(slots=True)
@@ -88,6 +106,11 @@ class VLMRuntimeState:
     vlm_runtime_processor: Any = None
     vlm_runtime_model: Any = None
     vlm_runtime_torch: Any = None
+    # Non-None when TRT vision encoder acceleration is active.
+    vlm_runtime_trt_context: Any = None
+    # Set when backend is "llamacpp"; holds the server base URL.
+    vlm_runtime_backend: str = "pytorch"
+    vlm_runtime_llamacpp_url: str = ""
 
 
 def initialize_vlm_layer(config: VLMConfig) -> VLMRuntimeState:
@@ -102,6 +125,55 @@ def initialize_vlm_layer(config: VLMConfig) -> VLMRuntimeState:
             vlm_runtime_model_id=Path(config.config_vlm_model).name or "disabled",
         )
 
+    backend = config.config_vlm_backend.strip().lower()
+    if backend not in _ALLOWED_VLM_BACKENDS:
+        raise ValueError(
+            f"config_vlm_backend must be one of {sorted(_ALLOWED_VLM_BACKENDS)}, got {backend!r}."
+        )
+
+    if backend == "llamacpp":
+        return _initialize_llamacpp_backend(config)
+
+    return _initialize_pytorch_backend(config)
+
+
+def _initialize_llamacpp_backend(config: VLMConfig) -> VLMRuntimeState:
+    """Connect to a running llama-server and return a lightweight runtime state."""
+    server_url = config.config_vlm_llamacpp_server_url.rstrip("/")
+    health_url = f"{server_url}/health"
+    try:
+        with urllib.request.urlopen(health_url, timeout=5) as resp:
+            body = json.loads(resp.read().decode())
+            status = body.get("status", "")
+    except Exception as exc:
+        raise RuntimeError(
+            f"llama-server health check failed at {health_url}. "
+            "Start the server first with scripts/start_llamacpp_server.sh. "
+            f"Original error: {exc}"
+        ) from exc
+
+    if status not in ("ok", "loading model"):
+        raise RuntimeError(
+            f"llama-server at {health_url} returned unexpected status: {status!r}. "
+            "Expected 'ok' or 'loading model'."
+        )
+
+    model_id = Path(config.config_vlm_model).name or "gemma-4-e2b-llamacpp"
+    print(f"[vlm_layer] llama.cpp backend: server at {server_url} (status={status!r})")
+    return VLMRuntimeState(
+        config_vlm_enabled=True,
+        config_vlm_model=config.config_vlm_model,
+        config_device="llamacpp",
+        vlm_runtime_device="llamacpp",
+        vlm_runtime_dtype="int4",
+        vlm_runtime_model_id=model_id,
+        vlm_runtime_backend="llamacpp",
+        vlm_runtime_llamacpp_url=server_url,
+    )
+
+
+def _initialize_pytorch_backend(config: VLMConfig) -> VLMRuntimeState:
+    """Load a HuggingFace model via PyTorch/transformers."""
     try:
         import torch
     except ModuleNotFoundError as exc:
@@ -149,6 +221,14 @@ def initialize_vlm_layer(config: VLMConfig) -> VLMRuntimeState:
     model = model.to(runtime_device)
     model.eval()
 
+    trt_context = _maybe_load_trt_vision_engine(
+        config=config,
+        model=model,
+        model_path=model_path,
+        runtime_device=runtime_device,
+        torch=torch,
+    )
+
     return VLMRuntimeState(
         config_vlm_enabled=True,
         config_vlm_model=str(model_path),
@@ -159,6 +239,8 @@ def initialize_vlm_layer(config: VLMConfig) -> VLMRuntimeState:
         vlm_runtime_processor=processor,
         vlm_runtime_model=model,
         vlm_runtime_torch=torch,
+        vlm_runtime_trt_context=trt_context,
+        vlm_runtime_backend="pytorch",
     )
 
 
@@ -335,6 +417,14 @@ def infer_vlm_semantics(
     vlm_prompt_text: str,
 ) -> str:
     """Run the model on the crop image and return raw decoded text."""
+    if vlm_runtime_state.vlm_runtime_backend == "llamacpp":
+        image = _coerce_image(vlm_frame_cropper_layer_package.vlm_frame_cropper_layer_image)
+        return _infer_llamacpp(
+            server_url=vlm_runtime_state.vlm_runtime_llamacpp_url,
+            image=image,
+            prompt_text=vlm_prompt_text,
+        )
+
     image = _coerce_image(vlm_frame_cropper_layer_package.vlm_frame_cropper_layer_image)
     messages = [
         {
@@ -384,6 +474,16 @@ def infer_vlm_semantics_batch(
         return []
     if len(vlm_prompt_texts) != len(vlm_frame_cropper_layer_packages):
         raise ValueError("vlm_prompt_texts must match vlm_frame_cropper_layer_packages length.")
+
+    if vlm_runtime_state.vlm_runtime_backend == "llamacpp":
+        return [
+            _infer_llamacpp(
+                server_url=vlm_runtime_state.vlm_runtime_llamacpp_url,
+                image=_coerce_image(pkg.vlm_frame_cropper_layer_image),
+                prompt_text=prompt,
+            )
+            for pkg, prompt in zip(vlm_frame_cropper_layer_packages, vlm_prompt_texts, strict=True)
+        ]
 
     images = [
         _coerce_image(pkg.vlm_frame_cropper_layer_image)
@@ -688,6 +788,185 @@ def save_sample_vlm_output_debug_images(
             )
         )
     return saved_paths
+
+
+def _infer_llamacpp(server_url: str, image: Any, prompt_text: str) -> str:
+    """Send an image + prompt to a running llama-server and return the response text.
+
+    Uses the OpenAI-compatible /v1/chat/completions endpoint that llama.cpp
+    exposes. The image is JPEG-encoded and sent as a base64 data URI.
+    No Python ML dependencies required — stdlib only (urllib, base64, json).
+    """
+    buf = io.BytesIO()
+    image.save(buf, format="JPEG", quality=85)
+    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    data_uri = f"data:image/jpeg;base64,{b64}"
+
+    payload = json.dumps({
+        "model": "local",
+        "messages": [
+            {
+                "role": "system",
+                "content": "Respond only with the requested output. Do not think or explain.",
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": data_uri}},
+                    {"type": "text", "text": prompt_text},
+                ],
+            },
+        ],
+        "max_tokens": 80,
+        "temperature": 0.0,
+        # Disable chain-of-thought reasoning tokens (Gemma-4 / Qwen thinking models).
+        "thinking_budget_tokens": 0,
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        f"{server_url}/v1/chat/completions",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(
+            f"llama-server returned HTTP {exc.code}: {exc.read().decode('utf-8', errors='replace')}"
+        ) from exc
+
+    try:
+        return str(body["choices"][0]["message"]["content"]).strip()
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError(f"Unexpected llama-server response shape: {body}") from exc
+
+
+def _maybe_load_trt_vision_engine(
+    config: VLMConfig,
+    model: Any,
+    model_path: Path,
+    runtime_device: str,
+    torch: Any,
+) -> Any | None:
+    """Load a TRT vision encoder engine and patch the model if available.
+
+    Returns the TRT execution context (non-None) if patching succeeded, or None
+    if TRT acceleration is disabled / unavailable.
+
+    The patch replaces  model.model.vision_model.forward  with a thin wrapper
+    that runs the TRT engine, returning output in the same  BaseModelOutputWithPooling
+    format that Idefics3ForConditionalGeneration expects.  The LM decoder, connector,
+    and generate() call are all unchanged.
+    """
+    if runtime_device != "cuda":
+        return None
+
+    # Determine engine path from config field or auto-discovery.
+    raw_field = config.config_vlm_trt_vision_engine
+    if raw_field == "":
+        # Explicitly disabled.
+        return None
+    if raw_field is None:
+        # Auto-discover: look for the conventional filename next to the model.
+        auto_path = model_path / "vision_encoder_fp16.trt"
+        engine_path: Path | None = auto_path if auto_path.is_file() else None
+    else:
+        engine_path = Path(raw_field).expanduser().resolve()
+
+    if engine_path is None or not engine_path.is_file():
+        return None
+
+    try:
+        import tensorrt as trt  # type: ignore[import-untyped]
+    except ModuleNotFoundError:
+        return None
+
+    # Verify the model has a patchable vision sub-module.
+    vision_model = getattr(getattr(model, "model", None), "vision_model", None)
+    if vision_model is None:
+        return None
+
+    print(f"[vlm_layer] TRT vision encoder: loading engine from {engine_path}")
+    try:
+        trt_logger = trt.Logger(trt.Logger.WARNING)
+        trt_runtime = trt.Runtime(trt_logger)
+        with open(engine_path, "rb") as f:
+            engine = trt_runtime.deserialize_cuda_engine(f.read())
+        context = engine.create_execution_context()
+    except Exception as exc:
+        print(f"[vlm_layer] WARNING: TRT engine load failed ({exc}); falling back to PyTorch.")
+        return None
+
+    # Determine vision encoder output dimensions from the engine.
+    # Output binding is index 1 (name "last_hidden_state").
+    out_shape_per_image = _trt_output_shape_per_image(engine)
+
+    # Patch vision_model.forward so that model.generate() transparently uses TRT.
+    vision_model.forward = _make_trt_vision_forward(
+        context=context,
+        out_shape_per_image=out_shape_per_image,
+        torch=torch,
+    )
+    engine_mb = engine_path.stat().st_size / 1024 ** 2
+    print(
+        f"[vlm_layer] TRT vision encoder active "
+        f"({engine_mb:.1f} MB, output/image {out_shape_per_image})"
+    )
+    return context
+
+
+def _trt_output_shape_per_image(engine: Any) -> tuple[int, int]:
+    """Return (seq_len, hidden_size) for one image from the TRT engine's output binding."""
+    # TRT 10 API: iterate binding names via get_tensor_name.
+    try:
+        for i in range(engine.num_io_tensors):
+            name = engine.get_tensor_name(i)
+            if engine.get_tensor_mode(name) == engine.get_tensor_mode(name).OUTPUT:
+                shape = engine.get_tensor_shape(name)
+                # shape is (-1, seq_len, hidden) or (batch, seq_len, hidden)
+                return (int(shape[1]), int(shape[2]))
+    except AttributeError:
+        pass
+    # Fallback for SmolVLM-256M: (512/16)^2 = 1024 patches, hidden_size=768.
+    return (1024, 768)
+
+
+def _make_trt_vision_forward(
+    context: Any,
+    out_shape_per_image: tuple[int, int],
+    torch: Any,
+) -> Any:
+    """Build a drop-in replacement for vision_model.forward using TRT."""
+    seq_len, hidden_size = out_shape_per_image
+
+    def _trt_forward(pixel_values: Any, **kwargs: Any) -> Any:
+        from transformers.modeling_outputs import BaseModelOutputWithPooling  # type: ignore[import-untyped]
+
+        batch = int(pixel_values.shape[0])
+
+        # TRT FP16 engine — cast input to float16 if needed.
+        pv = pixel_values.to(dtype=torch.float16).contiguous()
+
+        output_tensor = torch.empty(batch, seq_len, hidden_size, dtype=torch.float16, device="cuda")
+
+        context.set_input_shape("pixel_values", (batch, 3, int(pv.shape[2]), int(pv.shape[3])))
+        context.set_tensor_address("pixel_values", pv.data_ptr())
+        context.set_tensor_address("last_hidden_state", output_tensor.data_ptr())
+
+        stream = torch.cuda.current_stream().cuda_stream
+        context.execute_async_v3(stream_handle=stream)
+        torch.cuda.current_stream().synchronize()
+
+        # Return float32 so the downstream Idefics3 connector sees the same dtype
+        # it would get from the original bfloat16/float32 PyTorch path.
+        return BaseModelOutputWithPooling(
+            last_hidden_state=output_tensor.to(dtype=torch.float32),
+            pooler_output=None,
+        )
+
+    return _trt_forward
 
 
 def _normalize_json_payload(parsed_json: Any, raw_text: str) -> dict[str, Any]:
