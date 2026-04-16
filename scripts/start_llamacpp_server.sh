@@ -56,7 +56,10 @@ echo ""
 # conservative stable starting point.  Increment by 1–2 only after confirming
 # repeatable boot + stable inference.
 #
-#   --n-gpu-layers 13   : ~710 MiB GPU weights + ~532 MiB compute ≈ 1266 MiB total (near ceiling)
+#   --n-gpu-layers 20   : ~870 MiB GPU weights + ~532 MiB compute ≈ 1402 MiB total
+#                         NO-YOLO ISOLATION TEST — do not run with YOLO on GPU
+#                         Previously failed with SIGABRT from llama_params_fit; -fit off fixes that.
+#                         This run tests whether n=20 is stable with no YOLO workspace conflict.
 #   -fit off            : skip the auto-fit probe (crashes with abort() on Jetson)
 #   --no-mmproj-offload : keep CLIP vision encoder on CPU (its GPU alloc fails too)
 #   --flash-attn on     : KV cache 100 MiB → 3 MiB (huge reduction)
@@ -65,7 +68,7 @@ echo ""
 exec "${LLAMA_SERVER}" \
     --model "${MODEL}" \
     --mmproj "${MMPROJ}" \
-    --n-gpu-layers 13 \
+    --n-gpu-layers 20 \
     -fit off \
     --ctx-size 2048 \
     --flash-attn on \
