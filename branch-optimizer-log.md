@@ -266,6 +266,84 @@ consumes additional pool budget.
 **Reboot required.** After reboot, run `start_llamacpp_server.sh` DIRECTLY (no Python tests first)
 to get the server on GPU with 22/36 layers. Then benchmark real GPU numbers.
 
+### 2026-04-16 — GPU boot investigation (multiple reboots, exhaustive config sweep)
+
+#### Context
+Multiple reboots and configuration attempts were made trying to get the llama-server to start
+with as many GPU layers as possible. Key findings documented below.
+
+#### Key findings from config sweep
+
+**Flash attention works and helps a lot:**
+- `--flash-attn on` reduces KV cache from ~100 MiB → ~3.4 MiB (2048 ctx) — nearly free.
+- Compute buffer reduction is minor: 544 MiB → 538 MiB (ctx 2048 → 512). Not the bottleneck.
+
+**CLIP vision encoder (mmproj) requires its own GPU allocation:**
+- Even with `--no-mmproj-offload`, the mmproj CLIP model allocates ~216–532 MiB on GPU.
+- In runs where text model + compute buffer fit, the CLIP alloc is what finally fails.
+- `--no-mmproj-offload` keeps CLIP weights on CPU but CLIP compute still hits GPU.
+- Vision encoding on CPU (6 threads) is acceptable — only runs once per new image.
+
+**The auto-fit probe (`llama_params_fit`) crashes on Jetson:**
+- When n_gpu_layers is below ~28, `llama_params_fit` probes device memory and hits
+  an unhandled OOM path that calls `ggml_abort()` (SIGABRT, exit code 134).
+- Fix: pass `-fit off` to skip the probe and use the exact layer count specified.
+
+**`--no-mmap` makes things worse (ChatGPT review correction):**
+- `--no-mmap` forces a ~2.1 GB CPU allocation from system RAM, which competes directly
+  with GPU NvMap pages in Jetson's unified memory pool.
+- mmap (default) avoids this: CPU layers use on-demand file pages, GPU gets the RAM.
+- All further attempts use mmap (no `--no-mmap`).
+
+**`GGML_CUDA_ENABLE_UNIFIED_MEMORY=1` is not reliable:**
+- Switches `ggml_cuda_device_malloc` to `cudaMallocManaged`. Works for model weights
+  but the compute buffer (`ggml_gallocr`) path still fails identically.
+- Python-level `cudaMallocManaged` test succeeds for 1416+544 MiB, suggesting the issue
+  is either CUDA runtime internal overhead consuming NvMap before model loads, or the
+  allocator path not uniformly using managed memory.
+- Decision: drop this experiment — too unpredictable. Focus on fixed layer count.
+
+#### Revised NvMap budget model
+| Component | Size | Notes |
+|---|---|---|
+| CUDA runtime init overhead | ~200–400 MiB | cuBLAS handles, streams, internal cudaMalloc |
+| Text model GPU weights (mmap) | 786–1416 MiB | Scales with n_gpu_layers |
+| Compute/scratch buffer | ~530–544 MiB | **Fixed** — barely changes with layer count |
+| mmproj CLIP (must stay CPU) | 0 MiB GPU | Via `--no-mmproj-offload` |
+| **Usable NvMap total** | **~1400 MiB** | Empirically inferred |
+
+Budget constraint: `model_weights + 530 ≤ 1400` → model budget ≤ 870 MiB → **≤ 22 GPU layers**
+
+#### Configuration attempts summary (this session, post multiple reboots)
+| Config | n_gpu_layers | Outcome |
+|---|---|---|
+| mmap, no flags | 36 | Model OK (1416 MiB), compute 544 MiB FAIL |
+| no-mmap, unified mem | 36 | Model OK, compute 544 MiB FAIL |
+| mmap, flash-attn, unified mem, ctx-512 | 36 | Model OK, compute 538 MiB OK ✓, CLIP 216 MiB FAIL |
+| mmap, flash-attn, no-mmproj-offload | 36 | Compute 544 MiB FAIL |
+| mmap, flash-attn, no-mmproj-offload | 28 | Model OK (1218 MiB), compute 532 MiB FAIL |
+| mmap, flash-attn, no-mmproj-offload, -fit off | 20 | Model OK (1030 MiB), compute FAIL → SIGABRT |
+
+#### Current stable config (in `scripts/start_llamacpp_server.sh`)
+```
+llama-server \
+  --n-gpu-layers 20  -fit off \
+  --ctx-size 2048    --flash-attn on \
+  --no-mmproj-offload \
+  --threads 6        --threads-batch 6 \
+  --cache-type-k q4_0 --cache-type-v q4_0
+```
+- **Vision (mmproj):** CPU, 6 threads
+- **Text LM:** 20/36 layers GPU + 16/36 layers CPU (hybrid)
+- **KV cache:** GPU, ~3.4 MiB (flash-attn)
+
+#### Next steps after clean reboot
+1. Boot with 20 layers → verify stable + run latency benchmark
+2. If stable: try 22 layers
+3. If 22 stable: try 24
+4. Stop at first failure; previous value is the stable operating point
+5. Update this log with real latency numbers
+
 ### 2026-04-16 — Apple FastVLM-1.5B-int8 test
 - Candidate: `apple/FastVLM-1.5B-int8` (LlavaQwen2 architecture, INT8 quantized).
 - Result: **FAIL** — `llava_qwen2` model type not registered in transformers 5.5.4.
