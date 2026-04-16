@@ -1,6 +1,7 @@
-# NOTE: 24.10 images require newer driver stacks (560+). Jetson L4T R36.x
-# commonly ships with 540.x. Started with 24.06 but hit CUDA allocator bug.
-# Attempting 24.04 (older CUDA stack) to avoid PyTorch 2.4.0a0 GPU memory allocator issues.
+# Switched to NGC 24.04 for GPU stability testing.
+# - NGC 24.10: requires driver 560+, incompatible with L4T R36.4.7 (540.4.0)
+# - NGC 24.06: PyTorch 2.4.0a0 hits kernel-level NvMap allocator issues
+# - NGC 24.04: PyTorch 2.3.1, older CUDA stack, may avoid allocator bug
 FROM nvcr.io/nvidia/pytorch:24.04-py3-igpu
 
 ENV DEBIAN_FRONTEND=noninteractive \
