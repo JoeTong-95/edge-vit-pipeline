@@ -3,13 +3,13 @@
 
 config_device: cuda                                              # options: cpu | cuda
 config_input_source: video                                      # options: camera | video
-config_input_path: data/sample3.mp4                             # path: repo-relative or absolute; required if source=video
+config_input_path: data/upson1.mp4                             # path: repo-relative or absolute; required if source=video
 config_frame_resolution:                                       # [width, height] positive ints; smaller = less load
   - 640
   - 360
 config_roi_enabled: true                                        # options: true | false
-config_roi_vehicle_count_threshold: 30                          # int > 0; boxes counted toward ROI lock
-config_yolo_model: yolov10n.pt                                  # ultralytics .pt name/path (speed vs accuracy)
+config_roi_vehicle_count_threshold: 20                          # int > 0; boxes counted toward ROI lock
+config_yolo_model: yolov11v28_jingtao.pt                         # ultralytics .pt name/path (speed vs accuracy)
 config_yolo_confidence_threshold: 0.4                            # float [0.0, 1.0]; higher = stricter boxes
 config_vlm_enabled: true                                         # options: true | false
 config_vlm_model: src/vlm-layer/Qwen3.5-0.8B                    # local VLM dir path; required if vlm enabled
