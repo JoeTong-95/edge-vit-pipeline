@@ -337,12 +337,33 @@ llama-server \
 - **Text LM:** 20/36 layers GPU + 16/36 layers CPU (hybrid)
 - **KV cache:** GPU, ~3.4 MiB (flash-attn)
 
+#### Model allocation size — empirical data
+Measured GPU model buffer sizes for different n_gpu_layers (mmap mode):
+| n_gpu_layers | GPU model buffer | Notes |
+|---|---|---|
+| 36 | 1416 MiB | All layers, loads OK — compute 544 FAIL |
+| 28 | 1218 MiB | Loads OK — compute 532 FAIL |
+| 20 | 1030 MiB | Loads OK — compute abort (SIGABRT) |
+| 16 | ~883 MiB | FAIL at model alloc (pool already fragmented from prior run) |
+
+Observed scaling: ~24 MiB per transformer layer + ~550 MiB fixed overhead (lm_head, embeddings, output norm).
+Formula: `model_alloc ≈ 550 + n × 24 MiB`
+
+With compute buffer ~530 MiB fixed:  
+`NvMap budget = model_alloc + compute → 550 + n×24 + 530 ≤ ~1400 → n ≤ 13`
+
+Max usable transformer layers on GPU with current budget: **~13**
+
+#### Critical observations
+- The `-fit off` flag is required — `llama_params_fit` crashes with SIGABRT when probing configs on Jetson.
+- Each abort/crash leaves NvMap fragmented even after process exit — **reboot required between attempts**.
+- Model allocation sizes are NOT proportional to n_gpu_layers linearly from 0 — there is ~550 MiB of fixed GPU overhead (embedding + lm_head) always present regardless of layer count.
+
 #### Next steps after clean reboot
-1. Boot with 20 layers → verify stable + run latency benchmark
-2. If stable: try 22 layers
-3. If 22 stable: try 24
-4. Stop at first failure; previous value is the stable operating point
-5. Update this log with real latency numbers
+1. Boot with **n=10** (safe: 550+10×24+530 ≈ 1320 MiB) → verify stable + run latency benchmark
+2. If stable: try n=12, then n=13
+3. Stop at first failure; previous value is the stable operating point
+4. Update this log with real latency numbers
 
 ### 2026-04-16 — Apple FastVLM-1.5B-int8 test
 - Candidate: `apple/FastVLM-1.5B-int8` (LlavaQwen2 architecture, INT8 quantized).
