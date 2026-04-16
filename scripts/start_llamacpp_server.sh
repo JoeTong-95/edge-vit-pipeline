@@ -48,41 +48,28 @@ echo "Model:  ${MODEL}"
 echo "Mmproj: ${MMPROJ} [weights on CPU, compute on GPU via flash-attn]"
 echo ""
 
-# Memory strategy (empirically validated on Jetson Orin Nano, post-reboot):
+# Stable hybrid config (empirically determined on Jetson Orin Nano):
 #
-#   GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
-#     Switches GPU buffer allocation from cudaMalloc → cudaMallocManaged.
-#     cudaMallocManaged uses non-contiguous physical pages (bypasses NvMap IOVMM
-#     contiguous block limit), allowing the full 4-6 GB unified memory pool.
-#     Without this, a single 544 MiB cudaMalloc for the compute buffer fails after
-#     1416 MiB of model weights are loaded (NvMap contiguous limit ~1.9 GB).
+# The NvMap IOVMM pool after CUDA runtime init has ~1400 MiB of usable contiguous
+# space. The compute/scratch buffer is always ~530 MiB regardless of layer count.
+# That leaves ~870 MiB for model weights = ~22 GPU layers.  We use 20 here as the
+# conservative stable starting point.  Increment by 1–2 only after confirming
+# repeatable boot + stable inference.
 #
-#   --no-mmap
-#     Forces each tensor to be allocated individually via ggml_cuda_device_malloc
-#     (which respects GGML_CUDA_ENABLE_UNIFIED_MEMORY).  With mmap (default) the
-#     GPU weight buffer is allocated as ONE large contiguous cudaMalloc block,
-#     bypassing the unified-memory path and hitting the NvMap contiguous limit.
-#
-#   --no-mmproj-offload
-#     Keeps the CLIP/mmproj vision-encoder weights on CPU.  The mmproj GPU weight
-#     buffer (~216 MiB) would be the last allocation to fail even when everything
-#     else fits, because it is a separate cudaMalloc outside the unified-memory
-#     path.  Moving it to CPU avoids this.  Image encoding runs on CPU (6 threads),
-#     text generation on full GPU (36/36 layers).
-#
-#   --flash-attn on
-#     Reduces KV-cache from ~100 MiB → ~3 MiB (2048 ctx) and slightly shrinks the
-#     compute-buffer footprint (544 → 538 MiB), giving the allocation just enough
-#     headroom to succeed.
+#   --n-gpu-layers 20   : 787 MiB GPU weights + ~520 MiB compute ≈ 1307 MiB total
+#   -fit off            : skip the auto-fit probe (crashes with abort() on Jetson)
+#   --no-mmproj-offload : keep CLIP vision encoder on CPU (its GPU alloc fails too)
+#   --flash-attn on     : KV cache 100 MiB → 3 MiB (huge reduction)
+#   mmap (default)      : model loads with one GPU alloc, no 2 GB CPU RAM hit
 
-exec env GGML_CUDA_ENABLE_UNIFIED_MEMORY=1 "${LLAMA_SERVER}" \
+exec "${LLAMA_SERVER}" \
     --model "${MODEL}" \
     --mmproj "${MMPROJ}" \
-    --n-gpu-layers 99 \
+    --n-gpu-layers 20 \
+    -fit off \
     --ctx-size 2048 \
     --flash-attn on \
     --no-mmproj-offload \
-    --no-mmap \
     --threads 6 \
     --threads-batch 6 \
     --cache-type-k q4_0 \
