@@ -467,21 +467,30 @@ Run llama-server with n=20 GPU layers in isolation (no YOLO process). This is th
 - Wait — YOLO's 1025 MiB is additive only when YOLO loads. Without YOLO, the budget IS the ~870 MiB measured.
 - So no-YOLO test should try n=20 to see if YOLO's TRT workspace was fragmenting NvMap across boots.
 
-**Priority 2 — YOLO TRT workspace reduction:**
-Rebuild `yolov11v28_jingtao.engine` with `workspace=256` (MB) instead of default 1 GB:
-- YOLO footprint drops from ~1.2 GB to ~350-400 MiB
-- Remaining for llama-server: ~1400 - 400 = ~1000 MiB for model weights → ~13-14 layers
-- Still small GPU contribution. Not a silver bullet.
+**Priority 2 — YOLO TRT workspace reduction (secondary, worth trying):**
+TensorRT lets you cap the builder memory pool via `setMemoryPoolLimit()` or `trtexec --memPoolSize=workspace:<size>`. Default is 1 GiB. Rebuild `yolov11v28_jingtao.engine` with `workspace=256` MB:
 
-**Priority 3 — Accept architectural split (practical outcome):**
-| Scenario | YOLO | VLM | VLM re-query |
-|---|---|---|---|
-| Current (as deployed) | GPU TRT FP16 | CPU all-layers (8.2s) | 8.2s |
-| No-YOLO ceiling test | CPU | GPU all-layers (theoretical) | ~2-4s est. |
-| YOLO CPU + VLM full GPU | CPU (~50–100ms/frame) | GPU all-layers | ~2-4s est. |
-| Serial YOLO-then-VLM | GPU (YOLO runs, unloads) | GPU (VLM loads, runs) | 30s roundtrip |
+```python
+from ultralytics import YOLO
+model = YOLO('src/yolo-layer/models/yolov11v28_jingtao.pt')
+model.export(format='engine', workspace=256, device=0, half=True)
+```
 
-**GPT's blunt call (agreed):** If no-YOLO test still lands in the ~7s class, stop investing in the E2B+llama.cpp GPU hybrid on this 8 GB Jetson. The ~1s target requires full GPU utilization, which requires solving the YOLO TRT workspace conflict first.
+**Important nuance (GPT):** Runtime TRT memory = workspace pool + deserialized weights on device + execution context persistent activations. Even with workspace=256 MB, total YOLO footprint is still 300-400 MiB. Combined with n=10 llama-server (~1195 MiB) = ~1495-1595 MiB — still above the ~1400 MiB pool. **Concurrent residency still unlikely.** Treat this as making YOLO a better citizen for YOLO-alone benchmarks or serialized execution — not the unlock for concurrent GPU use.
+
+**Priority 3 — Serialized GPU architecture (if concurrent is impossible):**
+- YOLO runs frame → releases TRT context as completely as possible → llama-server runs → YOLO reloads
+- This is an engineering-inference recommendation from GPT, not a tested path
+- Complexity: high (dynamic model loading/unloading per frame cadence)
+
+| Scenario | YOLO | VLM | VLM re-query | Notes |
+|---|---|---|---|---|
+| Current (as deployed) | GPU TRT FP16 | CPU all-layers | 8.2s | Only works because llama-server starts first |
+| No-YOLO isolation test | — | GPU n=20 | **TBD — next reboot** | Key experiment |
+| YOLO CPU + VLM full GPU | CPU (~50ms/frame) | GPU all-layers | ~2-4s est. | Viable if YOLO CPU perf acceptable |
+| Serialized GPU | GPU (alternating) | GPU (alternating) | High latency per cycle | Complex, not practical for real-time |
+
+**GPT + agent consensus:** No-YOLO isolation test first. If that proves full GPU E2B is viable (sub-4s), then the decision is YOLO-CPU vs accept 8.2s. If isolation test still shows >7s, close the book on E2B+llama.cpp hybrid on this Jetson.
 
 #### Strategic reassessment
 
