@@ -41,6 +41,11 @@ class VLMConfig:
     config_vlm_enabled: bool = False
     config_vlm_model: str = str(DEFAULT_VLM_MODEL_PATH)
     config_device: str = "auto"
+    # Path to a pre-built TRT FP16 engine for the SigLIP vision encoder.
+    # None  → auto-discover: load <model_dir>/vision_encoder_fp16.trt if it exists.
+    # ""    → explicitly disabled even if the engine file is present.
+    # <str> → use this exact path.
+    config_vlm_trt_vision_engine: str | None = None
 
 
 @dataclass(slots=True)
@@ -88,6 +93,8 @@ class VLMRuntimeState:
     vlm_runtime_processor: Any = None
     vlm_runtime_model: Any = None
     vlm_runtime_torch: Any = None
+    # Non-None when TRT vision encoder acceleration is active.
+    vlm_runtime_trt_context: Any = None
 
 
 def initialize_vlm_layer(config: VLMConfig) -> VLMRuntimeState:
@@ -149,6 +156,14 @@ def initialize_vlm_layer(config: VLMConfig) -> VLMRuntimeState:
     model = model.to(runtime_device)
     model.eval()
 
+    trt_context = _maybe_load_trt_vision_engine(
+        config=config,
+        model=model,
+        model_path=model_path,
+        runtime_device=runtime_device,
+        torch=torch,
+    )
+
     return VLMRuntimeState(
         config_vlm_enabled=True,
         config_vlm_model=str(model_path),
@@ -157,6 +172,7 @@ def initialize_vlm_layer(config: VLMConfig) -> VLMRuntimeState:
         vlm_runtime_dtype=str(runtime_dtype),
         vlm_runtime_model_id=model_path.name,
         vlm_runtime_processor=processor,
+        vlm_runtime_trt_context=trt_context,
         vlm_runtime_model=model,
         vlm_runtime_torch=torch,
     )
@@ -688,6 +704,123 @@ def save_sample_vlm_output_debug_images(
             )
         )
     return saved_paths
+
+
+def _maybe_load_trt_vision_engine(
+    config: VLMConfig,
+    model: Any,
+    model_path: Path,
+    runtime_device: str,
+    torch: Any,
+) -> Any | None:
+    """Load a TRT FP16 engine and patch the SigLIP vision encoder if available.
+
+    Patches model.model.vision_model.vision_model.forward (SiglipVisionTransformer)
+    to run TRT instead of PyTorch. The outer Idefics3VisionTransformer wrapper still
+    runs its masking logic; only the inner ViT forward is replaced.
+
+    Returns the TRT execution context (non-None) on success, or None if TRT
+    acceleration is disabled / unavailable / engine file not found.
+    """
+    if runtime_device != "cuda":
+        return None
+
+    raw_field = config.config_vlm_trt_vision_engine
+    if raw_field == "":
+        return None  # explicitly disabled
+    if raw_field is None:
+        auto_path = model_path / "vision_encoder_fp16.trt"
+        engine_path: Path | None = auto_path if auto_path.is_file() else None
+    else:
+        engine_path = Path(raw_field).expanduser().resolve()
+
+    if engine_path is None or not engine_path.is_file():
+        return None
+
+    try:
+        import tensorrt as trt  # type: ignore[import-untyped]
+    except ModuleNotFoundError:
+        return None
+
+    # Locate Idefics3VisionTransformer — the full vision encoder we replace.
+    vision_model = getattr(getattr(model, "model", None), "vision_model", None)
+    if vision_model is None:
+        return None
+
+    print(f"[vlm_layer] TRT vision encoder: loading engine from {engine_path}")
+    try:
+        trt_logger = trt.Logger(trt.Logger.WARNING)
+        trt_runtime = trt.Runtime(trt_logger)
+        with open(engine_path, "rb") as f:
+            engine = trt_runtime.deserialize_cuda_engine(f.read())
+        context = engine.create_execution_context()
+    except Exception as exc:
+        print(f"[vlm_layer] WARNING: TRT engine load failed ({exc}); falling back to PyTorch.")
+        return None
+
+    out_shape_per_image = _trt_output_shape_per_image(engine)
+
+    # Replace vision_model.forward with TRT — the engine runs embeddings + encoder
+    # + post_layernorm in FP16 with full attention (no padding mask needed for
+    # complete image tiles).  **kwargs absorbs extra Idefics3 caller args.
+    vision_model.forward = _make_trt_siglip_forward(
+        context=context,
+        out_shape_per_image=out_shape_per_image,
+        torch=torch,
+    )
+    engine_mb = engine_path.stat().st_size / 1024 ** 2
+    print(
+        f"[vlm_layer] TRT vision encoder active "
+        f"({engine_mb:.1f} MB, output/image {out_shape_per_image})"
+    )
+    return context
+
+
+def _trt_output_shape_per_image(engine: Any) -> tuple[int, int]:
+    """Return (seq_len, hidden_size) per image from the TRT engine output binding."""
+    try:
+        for i in range(engine.num_io_tensors):
+            name = engine.get_tensor_name(i)
+            if engine.get_tensor_mode(name).name == "OUTPUT":
+                shape = engine.get_tensor_shape(name)
+                return (int(shape[1]), int(shape[2]))
+    except (AttributeError, IndexError):
+        pass
+    return (1024, 768)  # SmolVLM-256M defaults: (512/16)^2 patches, hidden=768
+
+
+def _make_trt_siglip_forward(
+    context: Any,
+    out_shape_per_image: tuple[int, int],
+    torch: Any,
+) -> Any:
+    """Return a forward function that runs TRT for the SigLIP vision encoder.
+
+    Compatible with both the direct SiglipVisionTransformer signature and the
+    call from Idefics3VisionTransformer (which may pass patch_attention_mask
+    and other kwargs — all are absorbed and ignored).
+    """
+    seq_len, hidden_size = out_shape_per_image
+
+    def _trt_forward(pixel_values: Any, **kwargs: Any) -> Any:
+        from transformers.modeling_outputs import BaseModelOutput  # type: ignore[import-untyped]
+
+        batch = int(pixel_values.shape[0])
+        pv = pixel_values.to(dtype=torch.float16).contiguous()
+        output_tensor = torch.empty(batch, seq_len, hidden_size, dtype=torch.float16, device="cuda")
+
+        context.set_input_shape("pixel_values", (batch, 3, int(pv.shape[2]), int(pv.shape[3])))
+        context.set_tensor_address("pixel_values", pv.data_ptr())
+        context.set_tensor_address("last_hidden_state", output_tensor.data_ptr())
+
+        stream = torch.cuda.current_stream().cuda_stream
+        context.execute_async_v3(stream_handle=stream)
+        torch.cuda.current_stream().synchronize()
+
+        # Cast back to float32 so downstream Idefics3 connector dtype is consistent.
+        return BaseModelOutput(last_hidden_state=output_tensor.to(dtype=torch.float32))
+
+    return _trt_forward
 
 
 def _normalize_json_payload(parsed_json: Any, raw_text: str) -> dict[str, Any]:
