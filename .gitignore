@@ -15,3 +15,6 @@ data/*.mp4
 *.engine
 *.bin
 *.gz
+
+# Large data files
+data/*.mp4
