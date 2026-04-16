@@ -30,6 +30,23 @@ These scripts are helpers around the layer APIs, not replacements for the layer 
 - `src/tracking-layer/util/automated_evaluation.py`: sequential benchmark sweep across CPU/CUDA, YOLO v8/v10/v11, and tracking on/off.
 - `src/tracking-layer/util/plot_evaluation_results.py`: creates styled summary plots from the evaluation SQLite output.
 
+## Running on Jetson
+
+See `JETSON_OPTIMIZATION.md` for the full session record. Quick-start:
+
+```bash
+# Install Jetson-optimized torch stack (run once)
+bash docker/setup-native-jetson.sh
+
+# Run benchmark with Jetson config (TRT FP16 engine, VLM on CPU)
+BENCH_CONFIG_YAML=src/configuration-layer/config.jetson.yaml python3 benchmark.py
+```
+
+The Jetson config (`config.jetson.yaml`) differs from the default in three ways:
+1. `config_device: cuda` — YOLO runs on GPU via TRT FP16 engine
+2. `config_vlm_device: cpu` — VLM runs on CPU (GPU memory is reserved for YOLO)
+3. `config_yolo_model: yolov11v28_jingtao.engine` — pre-built TRT engine
+
 ## Config Notes
 
 A few config values are especially important for the optional VLM path:
@@ -38,6 +55,8 @@ A few config values are especially important for the optional VLM path:
 - Once ROI is locked, the current YOLO layer now uses the native `roi_layer_image` crop shape for inference instead of forcing the crop back to the model's default square `imgsz`. ROI still operates inside the normalized frame space produced by `config_frame_resolution`, but YOLO no longer treats ROI crops like full-frame inputs at inference size.
 - `config_vlm_enabled`: enables the real VLM inference path, but cropper visualization can still run without VLM inference enabled.
 - `config_vlm_model`: selects the VLM model when `config_vlm_enabled` is true.
+- `config_vlm_device`: overrides `config_device` for the VLM only. Empty string inherits `config_device`. Use `cpu` on Jetson to reserve GPU for YOLO.
+- `config_yolo_imgsz`: optional `[H, W]` pair to force a specific inference resolution for TRT engines compiled at non-square shapes. Null means use the model default (640).
 - `config_vlm_crop_feedback_enabled`: when `true`, VLM may request a new crop round; when `false`, the first dispatched crop completes that track after JSON classification.
 - `config_vlm_crop_cache_size`: number of crops collected in the current round before cropper scores that round and sends one best image to VLM. After an accepted result is written into persistent state, tracking can continue but cropper and VLM are skipped for that track.
 - `config_vlm_dead_after_lost_frames`: number of consecutive `lost` tracking updates before the cropper marks the track `dead`. Once dead, a never-filled first cache round may still dispatch its best available crop instead of being dropped.
@@ -91,6 +110,15 @@ The current target-label gate also adds a terminal split:
 - accepted target-label JSON means the track is marked `done`
 
 ## Changes
+
+## 2026-04-16 (Jetson optimization)
+
+- Added `config_vlm_device` config key: per-component device override for VLM; empty = inherit `config_device`.
+- Added `config_yolo_imgsz` config key: explicit `[H, W]` inference size for non-square TRT engines.
+- Fixed `benchmark.py` double YOLO per frame: `update_roi_state` is a no-op post-lock; single YOLO call now feeds both the pipeline and ROI state (+49% pipeline FPS).
+- `src/yolo-layer/detector.py`: YOLO warmup before VLM load (NvMap reservation), FP16 inference, `is_trt` flag for engine-aware dispatch.
+- `src/tracking-layer/tracker.py`: `build_tracking_layer_package` emits flat arrays alongside nested tracks.
+- See `JETSON_OPTIMIZATION.md` for full session record and benchmark results.
 
 ## 2026-04-15
 
