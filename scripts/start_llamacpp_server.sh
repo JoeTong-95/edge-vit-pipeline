@@ -44,9 +44,13 @@ echo ""
 exec "${LLAMA_SERVER}" \
     --model "${MODEL}" \
     --mmproj "${MMPROJ}" \
-    --n-gpu-layers 20 \
-    --ctx-size 512 \
+    --n-gpu-layers 99 \
+    --ctx-size 2048 \
+    --threads 6 \
+    --threads-batch 6 \
+    --cache-type-k q4_0 \
+    --cache-type-v q4_0 \
+    --mlock \
     --port "${PORT}" \
     --host 127.0.0.1 \
-    --threads 4 \
     --no-mmap

@@ -807,7 +807,7 @@ def _infer_llamacpp(server_url: str, image: Any, prompt_text: str) -> str:
         "messages": [
             {
                 "role": "system",
-                "content": "Respond only with the requested output. Do not think or explain.",
+                "content": "Output JSON only.",
             },
             {
                 "role": "user",
@@ -817,7 +817,7 @@ def _infer_llamacpp(server_url: str, image: Any, prompt_text: str) -> str:
                 ],
             },
         ],
-        "max_tokens": 80,
+        "max_tokens": 48,
         "temperature": 0.0,
         # Disable chain-of-thought reasoning tokens (Gemma-4 / Qwen thinking models).
         "thinking_budget_tokens": 0,
