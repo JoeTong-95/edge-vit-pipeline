@@ -2,6 +2,7 @@ Layer changes in this branch
 
 - ## 2026-04-15
 -
+- Added `roi_study.py` and `roi_benchmark_matrix.py` (moved from `src/evaluation-output-layer/`) for ROI+YOLO isolation and ROI on/off matrix runs against `pipeline/benchmark.py`.
 - Added `ROI_BENCHMARK_NOTES.md` documenting why ROI sometimes appears to provide little YOLO speedup in end-to-end runs, and how to benchmark ROI correctly (post-lock sampling + infer vs post-processing timing).
 
 - Added `roi_layer.py` implementing the pipeline contract public API:

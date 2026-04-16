@@ -2,7 +2,7 @@
 """
 roi_benchmark_matrix.py
 
-Runs the evaluation-output-layer benchmark across multiple videos with ROI ON vs OFF,
+Runs repo-root `benchmark.py` across multiple videos with ROI ON vs OFF,
 without editing config.yaml. This is for investigation and reporting only.
 """
 
@@ -14,7 +14,7 @@ import sys
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
-BENCH_PATH = REPO_ROOT / "src" / "evaluation-output-layer" / "benchmark.py"
+BENCH_PATH = REPO_ROOT / "benchmark.py"
 
 
 def _load_benchmark_module():

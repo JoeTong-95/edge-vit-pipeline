@@ -1,5 +1,9 @@
 Layer changes in this branch
 
+- Added `measure_vlm_modes.py`: one figure with three mode clusters × four sample videos (`data/sample1.mp4`–`sample4.mp4` by default) + JSON; does not use `benchmark.py`; default output `E:\OneDrive\desktop\vlm-layer`. One VLM load shared across runs.
+
+- Spill queue JSONL: optional size-based rotation before each append (`config_vlm_spill_max_file_mb` → `maybe_rotate_spill_file` in `vlm_deferred_queue.py`; `visualize_vlm_realtime.AsyncVLMWorker` passes the byte limit). Rotated files are named `*.jsonl.rotated.<ms>` next to the active file.
+
 - Simplified the active VLM prompt contract to a short rigid JSON-only format:
   first answer whether the crop matches an active YOLO label such as `truck`
   or `bus`, then if yes return only numeric `wheel_count`,

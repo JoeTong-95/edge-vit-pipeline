@@ -7,6 +7,7 @@ from config_schema import (
     CONFIG_ALLOWED_DEVICES,
     CONFIG_ALLOWED_INPUT_SOURCES,
     CONFIG_ALLOWED_KEYS,
+    CONFIG_ALLOWED_VLM_RUNTIME_MODES,
     CONFIG_REQUIRED_PATH_INPUT_SOURCE,
 )
 from config_types import ConfigurationLayerConfig
@@ -88,3 +89,31 @@ def validate_config_values(config: ConfigurationLayerConfig | Mapping[str, Any])
 
     if int(config_values["config_vlm_dead_after_lost_frames"]) <= 0:
         raise ValueError("config_vlm_dead_after_lost_frames must be greater than 0.")
+
+    vlm_mode = str(config_values["config_vlm_runtime_mode"]).strip().lower()
+    if vlm_mode not in CONFIG_ALLOWED_VLM_RUNTIME_MODES:
+        raise ValueError(
+            f"config_vlm_runtime_mode must be one of {sorted(CONFIG_ALLOWED_VLM_RUNTIME_MODES)}."
+        )
+
+    if int(config_values["config_vlm_worker_max_queue_size"]) <= 0:
+        raise ValueError("config_vlm_worker_max_queue_size must be greater than 0.")
+
+    if int(config_values["config_vlm_worker_batch_size"]) <= 0:
+        raise ValueError("config_vlm_worker_batch_size must be greater than 0.")
+
+    if int(config_values["config_vlm_worker_batch_wait_ms"]) < 0:
+        raise ValueError("config_vlm_worker_batch_wait_ms must be >= 0.")
+
+    if not isinstance(config_values["config_vlm_realtime_throttle_enabled"], bool):
+        raise ValueError("config_vlm_realtime_throttle_enabled must be a bool.")
+
+    spill_path = str(config_values["config_vlm_worker_spill_queue_path"] or "").strip()
+    if vlm_mode == "spill" and not spill_path:
+        raise ValueError(
+            "config_vlm_worker_spill_queue_path is required when config_vlm_runtime_mode is 'spill'."
+        )
+
+    spill_max_mb = float(config_values["config_vlm_spill_max_file_mb"])
+    if spill_max_mb < 0.0:
+        raise ValueError("config_vlm_spill_max_file_mb must be >= 0 (0 disables spill-file rotation).")

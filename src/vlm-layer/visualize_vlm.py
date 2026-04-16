@@ -117,6 +117,13 @@ def load_runtime_settings() -> dict[str, Any]:
         "vlm_crop_feedback_enabled": get_config_value(config, "config_vlm_crop_feedback_enabled"),
         "vlm_crop_cache_size": get_config_value(config, "config_vlm_crop_cache_size"),
         "vlm_dead_after_lost_frames": get_config_value(config, "config_vlm_dead_after_lost_frames"),
+        "vlm_runtime_mode": get_config_value(config, "config_vlm_runtime_mode"),
+        "vlm_worker_max_queue_size": get_config_value(config, "config_vlm_worker_max_queue_size"),
+        "vlm_worker_batch_size": get_config_value(config, "config_vlm_worker_batch_size"),
+        "vlm_worker_batch_wait_ms": get_config_value(config, "config_vlm_worker_batch_wait_ms"),
+        "vlm_worker_spill_queue_path": get_config_value(config, "config_vlm_worker_spill_queue_path"),
+        "vlm_spill_max_file_mb": float(get_config_value(config, "config_vlm_spill_max_file_mb")),
+        "vlm_realtime_throttle_enabled": get_config_value(config, "config_vlm_realtime_throttle_enabled"),
         "output": "",
     }
 

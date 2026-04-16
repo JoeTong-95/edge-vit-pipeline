@@ -54,6 +54,16 @@ def normalize_config(raw_config: dict[str, Any]) -> ConfigurationLayerConfig:
         config_vlm_crop_feedback_enabled=_normalize_bool(merged["config_vlm_crop_feedback_enabled"], "config_vlm_crop_feedback_enabled"),
         config_vlm_crop_cache_size=int(merged["config_vlm_crop_cache_size"]),
         config_vlm_dead_after_lost_frames=int(merged["config_vlm_dead_after_lost_frames"]),
+        config_vlm_runtime_mode=str(merged["config_vlm_runtime_mode"]).strip().lower(),
+        config_vlm_worker_max_queue_size=int(merged["config_vlm_worker_max_queue_size"]),
+        config_vlm_worker_batch_size=int(merged["config_vlm_worker_batch_size"]),
+        config_vlm_worker_batch_wait_ms=int(merged["config_vlm_worker_batch_wait_ms"]),
+        config_vlm_worker_spill_queue_path=str(merged["config_vlm_worker_spill_queue_path"]).strip(),
+        config_vlm_spill_max_file_mb=float(merged["config_vlm_spill_max_file_mb"]),
+        config_vlm_realtime_throttle_enabled=_normalize_bool(
+            merged["config_vlm_realtime_throttle_enabled"],
+            "config_vlm_realtime_throttle_enabled",
+        ),
         config_scene_awareness_enabled=_normalize_bool(
             merged["config_scene_awareness_enabled"],
             "config_scene_awareness_enabled",

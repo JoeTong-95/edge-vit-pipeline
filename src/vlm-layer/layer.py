@@ -29,6 +29,13 @@ _ALLOWED_VLM_RETRY_REASONS = {
 _NO_ACK_REASON = "no"
 
 
+def _set_decoder_only_processor_left_padding(processor: Any) -> None:
+    """Causal / decoder-only LMs need left padding when batching variable-length prompts."""
+    tok = getattr(processor, "tokenizer", None)
+    if tok is not None and hasattr(tok, "padding_side"):
+        tok.padding_side = "left"
+
+
 @dataclass(slots=True)
 class VLMConfig:
     config_vlm_enabled: bool = False
@@ -125,6 +132,7 @@ def initialize_vlm_layer(config: VLMConfig) -> VLMRuntimeState:
             trust_remote_code=True,
             local_files_only=True,
         )
+        _set_decoder_only_processor_left_padding(processor)
         model_class = _load_model_class(transformers)
         model = model_class.from_pretrained(
             model_path,
@@ -307,10 +315,9 @@ def prepare_vlm_prompt(
     allowed_label_text = ", ".join(allowed_labels)
     json_only_prompt = (
         f"Allowed: {allowed_label_text}\n"
-        "Reply ONLY one of:\n"
-        "- is_truck=no\n"
-        '- JSON: {"is_truck":true,"wheel_count":INT,"estimated_weight_kg":INT,"ack_status":"accepted|retry_requested","retry_reasons":["occluded"]|["bad_angle"]|[]}\n'
-        "JSON keys must be exactly: is_truck, wheel_count, estimated_weight_kg, ack_status, retry_reasons"
+        "is_truck=no OR one JSON only with keys is_truck,wheel_count,estimated_weight_kg,ack_status,retry_reasons "
+        '(ack_status accepted|retry_requested). Ex: {"is_truck":true,"wheel_count":6,"estimated_weight_kg":9000,'
+        '"ack_status":"accepted","retry_reasons":[]}'
     )
     if vlm_layer_query_type == "vehicle_semantics_v1":
         return json_only_prompt

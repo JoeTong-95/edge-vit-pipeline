@@ -11,7 +11,7 @@ This note documents why ROI sometimes appears to provide little (or no) YOLO spe
 
 ### Evidence: isolated YOLO-only ROI study
 
-Script: `src/evaluation-output-layer/roi_study.py`
+Script: `src/roi-layer/roi_study.py`
 
 This study isolates **Layer 3 ROI + Layer 4 YOLO** and measures:
 
@@ -39,7 +39,7 @@ The benchmark’s YOLO timing was originally:
 
 The latter two are mostly **fixed overhead** that does not shrink proportionally with ROI pixels. If inference is already relatively fast, that constant overhead can dominate, making ROI speedups look small.
 
-To address this, `benchmark.py` now prints:
+To address this, `pipeline/benchmark.py` now prints:
 
 - `yolo_infer_ms` (inference only)
 - `yolo_post_ms` (filter + package)
@@ -48,7 +48,7 @@ To address this, `benchmark.py` now prints:
 
 If ROI locks late, a short measurement window may include only a small number of post-lock frames, so the post-lock average is noisy.
 
-To address this, `benchmark.py` supports a benchmark-only mode:
+To address this, `pipeline/benchmark.py` supports a benchmark-only mode:
 
 - `MEASURE_ONLY_AFTER_ROI_LOCK = True`
 

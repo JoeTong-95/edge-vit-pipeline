@@ -1,5 +1,12 @@
 # Configuration Layer Changes
 
+## 2026-04-15
+
+- Added VLM runtime knobs to the shared config contract: `config_vlm_runtime_mode`, `config_vlm_worker_max_queue_size`, `config_vlm_worker_batch_size`, `config_vlm_worker_batch_wait_ms`, `config_vlm_worker_spill_queue_path`, `config_vlm_spill_max_file_mb`, and `config_vlm_realtime_throttle_enabled`.
+- Updated defaults / schema / types / normalizer / validator so these knobs are available everywhere that reads `config.yaml`.
+- Updated `config.yaml` and `README.md` to document and expose the new knobs for benchmark + realtime VLM tools.
+- `config_vlm_spill_max_file_mb` caps the active spill JSONL size by rotating to a sibling `*.jsonl.rotated.<ms>` file (delete or archive rotated files separately for 24/7 deployments).
+
 ## 2026-04-10
 
 - Added `config_vlm_dead_after_lost_frames` to the shared configuration contract so the cropper can declare a track dead after a configurable number of consecutive `lost` tracking updates.

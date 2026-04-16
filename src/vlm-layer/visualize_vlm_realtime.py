@@ -80,6 +80,7 @@ class AsyncVLMWorker:
         batch_size: int = 1,
         batch_wait_ms: int = 20,
         spill_queue_path: str = "",
+        spill_max_file_bytes: int = 0,
     ) -> None:
         self.vlm_state = vlm_state
         self.feedback_enabled = feedback_enabled
@@ -94,6 +95,7 @@ class AsyncVLMWorker:
         self.batch_size = max(1, int(batch_size))
         self.batch_wait_ms = max(0, int(batch_wait_ms))
         self.spill_queue_path = str(spill_queue_path or "").strip()
+        self.spill_max_file_bytes = max(0, int(spill_max_file_bytes))
         self.spilled_count = 0
         self.spill_errors = 0
 
@@ -236,6 +238,7 @@ class AsyncVLMWorker:
                     bbox=getattr(crop_pkg, "vlm_frame_cropper_layer_bbox", None) if crop_pkg is not None else None,
                     created_at_unix_s=float(task.get("submitted_at", time.time())),
                 ),
+                max_file_bytes=(self.spill_max_file_bytes if self.spill_max_file_bytes > 0 else None),
             )
             self.spilled_count += 1
             ack = build_vlm_ack_package(str(task.get("track_id", "")), "accepted", "deferred_spill_to_queue", False)
@@ -299,11 +302,42 @@ def main() -> None:
     parser.add_argument("--max-frames", type=int, default=0)
     parser.add_argument("--show", action="store_true")
     parser.add_argument("--output", default="", help="Optional output video path")
-    parser.add_argument("--max-queue-size", type=int, default=64)
-    parser.add_argument("--vlm-batch-size", type=int, default=1, help="Micro-batch size for VLM worker (1 disables batching).")
-    parser.add_argument("--vlm-batch-wait-ms", type=int, default=20, help="Max wait to form a batch before running VLM.")
-    parser.add_argument("--vlm-spill-queue", default="", help="If set, overflow tasks spill to this JSONL path (cache-and-run).")
-    parser.add_argument("--no-realtime-throttle", action="store_true", help="Run as fast as possible instead of pacing to source FPS")
+    parser.add_argument(
+        "--vlm-mode",
+        default=str(defaults.get("vlm_runtime_mode", "inline")).strip().lower(),
+        choices=["inline", "async", "spill"],
+        help="VLM dispatch mode: inline|async|spill (spill writes overflow to queue file).",
+    )
+    parser.add_argument("--max-queue-size", type=int, default=int(defaults.get("vlm_worker_max_queue_size", 64)))
+    parser.add_argument(
+        "--vlm-batch-size",
+        type=int,
+        default=int(defaults.get("vlm_worker_batch_size", 1)),
+        help="Micro-batch size for VLM worker (1 disables batching).",
+    )
+    parser.add_argument(
+        "--vlm-batch-wait-ms",
+        type=int,
+        default=int(defaults.get("vlm_worker_batch_wait_ms", 20)),
+        help="Max wait to form a batch before running VLM.",
+    )
+    parser.add_argument(
+        "--vlm-spill-queue",
+        default=str(defaults.get("vlm_worker_spill_queue_path", "") or ""),
+        help="JSONL path used by spill mode (cache-and-run).",
+    )
+    parser.add_argument(
+        "--spill-max-file-mb",
+        type=float,
+        default=float(defaults.get("vlm_spill_max_file_mb", 0.0) or 0.0),
+        help="Rotate spill JSONL when file size reaches this many MB (0 = unlimited).",
+    )
+    parser.add_argument(
+        "--no-realtime-throttle",
+        action="store_true",
+        default=not bool(defaults.get("vlm_realtime_throttle_enabled", True)),
+        help="Run as fast as possible instead of pacing to source FPS",
+    )
     args = parser.parse_args()
 
     frame_resolution = tuple(defaults["frame_resolution"])
@@ -338,13 +372,17 @@ def main() -> None:
     initialize_tracking_layer(frame_rate=int(fps))
     crop_cache_state = initialize_vlm_crop_cache(defaults["vlm_crop_cache_size"], defaults["vlm_dead_after_lost_frames"])
     initialize_vehicle_state_layer(prune_after_lost_frames=None)
+    spill_queue_path = args.vlm_spill_queue if args.vlm_mode == "spill" else ""
+    spill_mb = float(args.spill_max_file_mb)
+    spill_max_bytes = int(spill_mb * 1024 * 1024) if spill_mb > 0.0 else 0
     worker = AsyncVLMWorker(
         vlm_state=vlm_state,
         feedback_enabled=bool(defaults["vlm_crop_feedback_enabled"]),
         max_queue_size=args.max_queue_size,
         batch_size=args.vlm_batch_size,
         batch_wait_ms=args.vlm_batch_wait_ms,
-        spill_queue_path=args.vlm_spill_queue,
+        spill_queue_path=spill_queue_path,
+        spill_max_file_bytes=spill_max_bytes,
     )
     worker.start()
 
