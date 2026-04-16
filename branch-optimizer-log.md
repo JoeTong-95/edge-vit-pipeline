@@ -219,6 +219,53 @@ GPU is clearly better than CPU for VLM on this Jetson, but we now need to reduce
 --mlock --no-mmap
 ```
 
+### 2026-04-16 — NvMap IOVMM constraint deep-dive (GPU benchmark blocker)
+
+#### Problem
+After rebooting and retrying, all configurations with `-ngl 99` still fail at the compute buffer
+allocation step. Root cause: the Jetson Orin Nano's NvMap IOVMM pool is smaller than expected.
+
+#### Empirical measurements (raw `cudaMalloc` via ctypes, fresh process after reboot)
+| Allocation | Result |
+|---|---|
+| Single alloc, 1200 MiB | OK |
+| Single alloc, 1346 MiB | FAIL |
+| Two allocs: 1103 + 544 MiB | FAIL |
+| Two allocs: 900 + 600 MiB | OK |
+| Two allocs: 900 + 544 MiB | OK |
+| PyTorch `torch.zeros(1416 MiB)` | OK (uses virtual memory API, not raw cudaMalloc) |
+
+Key insight: llama.cpp uses raw `cudaMalloc` which is bounded by the NvMap IOVMM physical page pool
+(~1500 MiB effective). PyTorch bypasses this with CUDA virtual memory APIs — this is why PyTorch
+could allocate 1416+ MiB while llama.cpp could not.
+
+#### Memory budget breakdown (per server run)
+| Component | Size | Notes |
+|---|---|---|
+| Text model GPU weights (36 layers, mmap) | 1416 MiB | Single `cudaMalloc` |
+| mmproj vision encoder (GPU) | 532 MiB | Single `cudaMalloc` |
+| Compute/scratch buffer | ~520-544 MiB | Single `cudaMalloc` |
+| **Total needed (all GPU)** | **~2468 MiB** | **Far exceeds ~1500 MiB pool** |
+
+#### Viable configuration
+To fit within the NvMap pool:
+- Keep mmproj on **CPU** via `LLAMA_ARG_MMPROJ_OFFLOAD=0` (saves 532 MiB of pool)
+- Use **22/36 GPU layers** (866 MiB weights + ~520 MiB compute = 1386 MiB ≤ ~1500 MiB) ✓
+- Use **mmap** (NOT `--no-mmap`) so the 866 MiB text weights are a single contiguous alloc
+
+Script updated accordingly. GPU inference with 22/36 layers is still ~61% of transformer
+compute on GPU — meaningfully faster than pure CPU (8.2s baseline).
+
+#### Why this wasn't obvious initially
+Each failed llama-server start (partial allocations that then crash) degrades the NvMap pool
+through fragmentation. Once degraded, even previously-working configurations fail. A reboot
+resets the NvMap state to a clean ~1500 MiB pool. Running Python CUDA tests before the server
+consumes additional pool budget.
+
+#### Next step
+**Reboot required.** After reboot, run `start_llamacpp_server.sh` DIRECTLY (no Python tests first)
+to get the server on GPU with 22/36 layers. Then benchmark real GPU numbers.
+
 ### 2026-04-16 — Apple FastVLM-1.5B-int8 test
 - Candidate: `apple/FastVLM-1.5B-int8` (LlavaQwen2 architecture, INT8 quantized).
 - Result: **FAIL** — `llava_qwen2` model type not registered in transformers 5.5.4.
