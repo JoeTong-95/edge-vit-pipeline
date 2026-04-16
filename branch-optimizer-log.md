@@ -433,18 +433,69 @@ GPU usage is low not because of misconfiguration but because **9 GPU layers genu
 3. Find max stable n via ladder; stop at first failure
 4. **Decision gate**: if max stable layers still gives < 30% speedup, escalate strategy (see below)
 
+#### YOLO TRT + llama-server GPU conflict — critical finding
+
+**Test:** loaded YOLO TRT engine (`yolov11v28_jingtao.engine`, 53 MB on disk) while llama-server was running (n=10, ~1195 MiB GPU). Result:
+
+```
+NvMapMemAllocInternalTagged: 1075072515 error 12   ← ENOMEM
+torch.AcceleratorError: CUDA error: out of memory
+```
+
+`1075072515 bytes = 1025 MiB` — **TRT's default workspace** (exactly `1<<30` + overhead). This is what the TRT runtime tries to allocate as a scratch buffer at engine load time, regardless of model size.
+
+**Memory accounting (post-reboot NvMap budget ~1400 MiB effective):**
+
+| Component | NvMap needed | Notes |
+|---|---|---|
+| CUDA runtime init overhead | ~200 MiB | Unavoidable |
+| YOLO TRT workspace | ~1025 MiB | TRT default, set at engine-build time |
+| YOLO TRT weights (deserialized) | ~100–150 MiB | 53 MB engine → 2-3× at runtime |
+| **YOLO total** | **~1200–1375 MiB** | Almost the entire NvMap budget |
+| llama-server compute buffer | 532 MiB | Fixed, required |
+| **YOLO + llama-server GPU** | **~1732+ MiB** | **Exceeds budget by ~330+ MiB** |
+
+**Conclusion: YOLO TRT and llama-server GPU are mutually exclusive on this Jetson.** They cannot coexist in GPU memory simultaneously. The current hybrid (n=10 GPU layers) only works because llama-server is started *before* YOLO, claiming NvMap first. In the actual pipeline, YOLO initializes before `initialize_vlm_layer()`, meaning YOLO would claim its ~1.2 GB first, leaving <200 MiB for llama-server — not enough for even the compute buffer.
+
+**The no-YOLO test (GPT recommendation) is now the critical next experiment.** Without YOLO's 1 GB TRT workspace, the NvMap budget for llama-server rises from ~375 MiB to ~1200 MiB for model weights, enabling n=20+ layers.
+
+#### GPT-recommended revised game plan (2026-04-16)
+
+**Priority 1 — Control test (next reboot, no YOLO):**
+Run llama-server with n=20 GPU layers in isolation (no YOLO process). This is the cleanest experiment:
+- Without YOLO: model weights budget = 1400 - 532 = ~870 MiB → ~13 layers (same as before)
+- Wait — YOLO's 1025 MiB is additive only when YOLO loads. Without YOLO, the budget IS the ~870 MiB measured.
+- So no-YOLO test should try n=20 to see if YOLO's TRT workspace was fragmenting NvMap across boots.
+
+**Priority 2 — YOLO TRT workspace reduction:**
+Rebuild `yolov11v28_jingtao.engine` with `workspace=256` (MB) instead of default 1 GB:
+- YOLO footprint drops from ~1.2 GB to ~350-400 MiB
+- Remaining for llama-server: ~1400 - 400 = ~1000 MiB for model weights → ~13-14 layers
+- Still small GPU contribution. Not a silver bullet.
+
+**Priority 3 — Accept architectural split (practical outcome):**
+| Scenario | YOLO | VLM | VLM re-query |
+|---|---|---|---|
+| Current (as deployed) | GPU TRT FP16 | CPU all-layers (8.2s) | 8.2s |
+| No-YOLO ceiling test | CPU | GPU all-layers (theoretical) | ~2-4s est. |
+| YOLO CPU + VLM full GPU | CPU (~50–100ms/frame) | GPU all-layers | ~2-4s est. |
+| Serial YOLO-then-VLM | GPU (YOLO runs, unloads) | GPU (VLM loads, runs) | 30s roundtrip |
+
+**GPT's blunt call (agreed):** If no-YOLO test still lands in the ~7s class, stop investing in the E2B+llama.cpp GPU hybrid on this 8 GB Jetson. The ~1s target requires full GPU utilization, which requires solving the YOLO TRT workspace conflict first.
+
 #### Strategic reassessment
 
 | Approach | Status | Realistic latency |
 |---|---|---|
-| n=10 hybrid (current) | Working | ~8s re-query |
-| n=13–15 hybrid (next reboot) | Pending | ~7–7.5s re-query (est.) |
-| Max stable n (~20+) | Blocked by NvMap budget | ~5–6s re-query (est.) |
-| Full GPU (36/36) | Fails — compute buffer OOM | ~1–2s re-query (theoretical) |
-| SmolVLM-256M PyTorch GPU | Already working on other branch | ~6.3s per query |
-| Pure CPU (E2B, all layers CPU) | Working | ~8.2s re-query |
+| n=10 hybrid (current, no YOLO in GPU) | Working | ~8s re-query |
+| No-YOLO isolation test, n=20 | **Next reboot** | TBD — key experiment |
+| Full GPU, no YOLO (36/36) | Blocked by compute buffer | ~1–2s (theoretical) |
+| YOLO CPU + llama-server full GPU | Requires pipeline config change | ~2-4s est. |
+| YOLO GPU + llama-server GPU | **Impossible** — mutually exclusive | N/A |
+| SmolVLM-256M PyTorch GPU | Working, other branch | ~6.3s per query |
+| Pure CPU E2B (all layers CPU) | Working | ~8.2s re-query |
 
-The ~1s target is only achievable with full GPU utilization (all layers on GPU). With NvMap limiting us to ~1400 MiB and the compute buffer taking 532 MiB of that, we can only offload ~13 layers — **not enough to reach 1s**.
+The ~1s target requires either (a) full GPU for E2B + YOLO off GPU, or (b) a smaller model that fits in <870 MiB alongside YOLO's footprint.
 
 ### 2026-04-16 — Apple FastVLM-1.5B-int8 test
 - Candidate: `apple/FastVLM-1.5B-int8` (LlavaQwen2 architecture, INT8 quantized).
