@@ -244,7 +244,6 @@ def normalize_vlm_result(vlm_layer_raw_result: VLMRawResult) -> dict[str, Any]:
     parsed_fields = parse_vlm_response(vlm_layer_raw_result.vlm_layer_raw_text)
     parsed_fields.setdefault("is_truck", True)
     parsed_fields.setdefault("wheel_count", 0)
-    parsed_fields.setdefault("estimated_weight_kg", 0)
     default_ack_status = "accepted" if vlm_layer_raw_result.vlm_layer_query_type == "vehicle_semantics_single_shot_v1" else "retry_requested"
     default_retry_reasons = [] if default_ack_status == "accepted" else ["occluded"]
     parsed_fields.setdefault("vlm_ack_status", default_ack_status)
@@ -259,7 +258,6 @@ def normalize_vlm_result(vlm_layer_raw_result: VLMRawResult) -> dict[str, Any]:
     parsed_fields["vlm_layer_attributes"] = {
         "is_truck": parsed_fields.get("is_truck", True),
         "wheel_count": parsed_fields.get("wheel_count", 0),
-        "estimated_weight_kg": parsed_fields.get("estimated_weight_kg", 0),
         "vlm_ack_status": parsed_fields.get("vlm_ack_status", "retry_requested"),
         "vlm_retry_reasons": list(parsed_fields.get("vlm_retry_reasons", [])),
         "raw_text": vlm_layer_raw_result.vlm_layer_raw_text,
@@ -318,8 +316,8 @@ def prepare_vlm_prompt(
     allowed_label_text = ", ".join(allowed_labels)
     json_only_prompt = (
         f"Allowed: {allowed_label_text}\n"
-        "is_truck=no OR one JSON only with keys is_truck,wheel_count,estimated_weight_kg,ack_status,retry_reasons "
-        '(ack_status accepted|retry_requested). Ex: {"is_truck":true,"wheel_count":6,"estimated_weight_kg":9000,'
+        "is_truck=no OR one JSON only with keys is_truck,wheel_count,ack_status,retry_reasons "
+        '(ack_status accepted|retry_requested). Ex: {"is_truck":true,"wheel_count":6,'
         '"ack_status":"accepted","retry_reasons":[]}'
     )
     if vlm_layer_query_type == "vehicle_semantics_v1":
@@ -363,7 +361,7 @@ def infer_vlm_semantics(
     with vlm_runtime_state.vlm_runtime_torch.inference_mode():
         generated_ids = vlm_runtime_state.vlm_runtime_model.generate(
             **inputs,
-            max_new_tokens=64,
+            max_new_tokens=32,
             do_sample=False,
         )
 
@@ -419,7 +417,7 @@ def infer_vlm_semantics_batch(
     with vlm_runtime_state.vlm_runtime_torch.inference_mode():
         generated_ids = vlm_runtime_state.vlm_runtime_model.generate(
             **inputs,
-            max_new_tokens=64,
+            max_new_tokens=32,
             do_sample=False,
         )
 
@@ -465,7 +463,6 @@ def parse_vlm_response(vlm_layer_raw_text: str) -> dict[str, Any]:
         return {
             "is_truck": False,
             "wheel_count": 0,
-            "estimated_weight_kg": 0,
             "vlm_layer_label": _NO_ACK_REASON,
             "vlm_layer_confidence": None,
             "vlm_ack_status": "accepted",
@@ -493,12 +490,10 @@ def parse_vlm_response(vlm_layer_raw_text: str) -> dict[str, Any]:
     )
     is_truck = _coerce_optional_bool(parsed_pairs.get("is_truck", parsed_pairs.get("truck", "true")))
     wheel_count = _coerce_int_value(parsed_pairs.get("wheel_count"), default=0)
-    estimated_weight_kg = _coerce_int_value(parsed_pairs.get("estimated_weight_kg"), default=0)
 
     return {
         "is_truck": True if is_truck is None else is_truck,
         "wheel_count": wheel_count,
-        "estimated_weight_kg": estimated_weight_kg,
         "vlm_layer_label": _NO_ACK_REASON if (True if is_truck is None else is_truck) is False else "target_label_match",
         "vlm_layer_confidence": None,
         "vlm_ack_status": ack_status,
@@ -584,7 +579,7 @@ def build_sample_vlm_output_json_strings() -> list[str]:
             vlm_layer_query_type="vehicle_semantics_v1",
             vlm_layer_model_id="demo-qwen",
             vlm_layer_raw_text=(
-                '{"is_truck":true,"wheel_count":18,"estimated_weight_kg":24000,'
+                '{"is_truck":true,"wheel_count":18,'
                 '"ack_status":"accepted","retry_reasons":[]}'
             ),
             vlm_layer_raw_response={"prompt_text": "demo accepted prompt"},
@@ -594,7 +589,7 @@ def build_sample_vlm_output_json_strings() -> list[str]:
             vlm_layer_query_type="vehicle_semantics_v1",
             vlm_layer_model_id="demo-qwen",
             vlm_layer_raw_text=(
-                '{"is_truck":true,"wheel_count":0,"estimated_weight_kg":0,'
+                '{"is_truck":true,"wheel_count":0,'
                 '"ack_status":"retry_requested","retry_reasons":["occluded"]}'
             ),
             vlm_layer_raw_response={"prompt_text": "demo retry prompt"},
@@ -654,7 +649,7 @@ def save_sample_vlm_output_debug_images(
             vlm_layer_query_type="vehicle_semantics_v1",
             vlm_layer_model_id="demo-qwen",
             vlm_layer_raw_text=(
-                '{"is_truck":true,"wheel_count":18,"estimated_weight_kg":24000,'
+                '{"is_truck":true,"wheel_count":18,'
                 '"ack_status":"accepted","retry_reasons":[]}'
             ),
             vlm_layer_raw_response={"prompt_text": "demo accepted prompt"},
@@ -664,7 +659,7 @@ def save_sample_vlm_output_debug_images(
             vlm_layer_query_type="vehicle_semantics_v1",
             vlm_layer_model_id="demo-qwen",
             vlm_layer_raw_text=(
-                '{"is_truck":true,"wheel_count":0,"estimated_weight_kg":0,'
+                '{"is_truck":true,"wheel_count":0,'
                 '"ack_status":"retry_requested","retry_reasons":["occluded"]}'
             ),
             vlm_layer_raw_response={"prompt_text": "demo retry prompt"},
@@ -702,12 +697,10 @@ def _normalize_json_payload(parsed_json: Any, raw_text: str) -> dict[str, Any]:
     retry_reasons = _normalize_retry_reasons(parsed_json.get("retry_reasons", []))
     is_truck = _coerce_optional_bool(parsed_json.get("is_truck", True))
     wheel_count = _coerce_int_value(parsed_json.get("wheel_count"), default=0)
-    estimated_weight_kg = _coerce_int_value(parsed_json.get("estimated_weight_kg"), default=0)
     is_target = True if is_truck is None else is_truck
     return {
         "is_truck": is_target,
         "wheel_count": wheel_count,
-        "estimated_weight_kg": estimated_weight_kg,
         "vlm_layer_label": _NO_ACK_REASON if is_target is False else "target_label_match",
         "vlm_layer_confidence": None,
         "vlm_ack_status": ack_status,
@@ -720,7 +713,6 @@ def _default_retry_parse(reason: str) -> dict[str, Any]:
     return {
         "is_truck": True,
         "wheel_count": 0,
-        "estimated_weight_kg": 0,
         "vlm_layer_label": "unknown",
         "vlm_layer_confidence": None,
         "vlm_ack_status": "retry_requested",

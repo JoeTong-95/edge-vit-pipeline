@@ -106,7 +106,6 @@ The current VLM contract is intentionally narrow:
 - if not, return `is_truck=false` and acknowledge the track with reason `no`
 - if yes, return a small JSON payload with only:
   - `wheel_count`
-  - `estimated_weight_kg`
   - `ack_status`
   - `retry_reasons`
 
@@ -726,7 +725,7 @@ Expected `vehicle_semantics_v1` behavior:
 
 - the prompt should first ask: is this one of the currently active YOLO labels, such as `truck` or `bus`?
 - if no: return `is_truck=false`, `ack_status=accepted`, and no retry reasons
-- if yes and the image is good enough: return rigid JSON with `wheel_count`, `estimated_weight_kg`, `ack_status=accepted`, and `retry_reasons=[]`
+- if yes and the image is good enough: return rigid JSON with `wheel_count`, `ack_status=accepted`, and `retry_reasons=[]`
 - if yes but the image is not good enough: return rigid JSON with `ack_status=retry_requested` plus one or more retry reasons such as `occluded` or `bad_angle`
 
 Interacts with:

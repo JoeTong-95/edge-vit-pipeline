@@ -89,7 +89,6 @@ Short version:
 - if yes, it returns a small rigid JSON payload
 - the current JSON focuses on:
   - `wheel_count`
-  - `estimated_weight_kg`
   - `ack_status`
   - `retry_reasons`
 - the current debug-image workflow in `src/vlm-layer` saves:
@@ -141,7 +140,6 @@ The current target-label gate also adds a terminal split:
   or `bus`, then if yes return rigid JSON.
 - Documented that the active VLM JSON now focuses on:
   - `wheel_count`
-  - `estimated_weight_kg`
   - `ack_status`
   - `retry_reasons`
 - Documented that `vlm_image_quality_notes` is no longer part of the active

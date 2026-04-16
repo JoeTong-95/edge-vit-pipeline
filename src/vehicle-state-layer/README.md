@@ -56,7 +56,6 @@ centers on:
 
 - `is_truck`
 - `wheel_count`
-- `estimated_weight_kg`
 - `vlm_ack_status`
 - `vlm_retry_reasons`
 
@@ -69,8 +68,8 @@ Layer changes in this branch
   `vehicle_state_layer_truck_type` now behaves as a legacy compatibility slot
   rather than an actively populated semantic target.
 - Updated `README.md` to explain that the active VLM semantic payload now
-  centers on `is_truck`, `wheel_count`, `estimated_weight_kg`,
-  `vlm_ack_status`, and `vlm_retry_reasons`.
+  centers on `is_truck`, `wheel_count`, `vlm_ack_status`, and
+  `vlm_retry_reasons`.
 
 - Added `vehicle_state_layer.py` implementing the pipeline contract public API:
   `initialize_vehicle_state_layer`, `update_vehicle_state_from_tracking`,

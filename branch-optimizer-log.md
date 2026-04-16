@@ -75,3 +75,19 @@ GPU is clearly better than CPU for VLM on this Jetson, but we now need to reduce
 - Tradeoff accepted for now:
   - CPU VLM: better FPS (~21.85), unusable semantic latency (~104s/query)
   - GPU VLM: lower FPS (~19.23), dramatically better semantic latency (~11.3s/query)
+
+### 2026-04-16 — Contract-preserving semantic slimming
+- User-approved contract change: remove `estimated_weight_kg`.
+- Implemented end-to-end in VLM layer:
+  - prompt no longer requests weight
+  - parser/normalizer no longer emit weight field
+  - debug/sample outputs updated
+- Kept full pipeline semantics and ack flow unchanged:
+  - `is_truck`, `wheel_count`, `ack_status`, `retry_reasons`
+- Also reduced VLM generation cap from 64 -> 32 tokens to match slimmer JSON payload.
+- Benchmark findings:
+  - CPU-VLM profile (`config.jetson.yaml`): `avg_query_ms` improved from ~103,983 -> ~82,679 ms (~20.5% faster), pipeline FPS ~22.47.
+  - GPU-VLM profile rerun hit Jetson allocator instability (`CUDACachingAllocator.cpp:1131`) and VLM was skipped in that run.
+- Interpretation:
+  - Contract slimming is directionally correct and improves semantic latency on stable runs.
+  - Biggest blocker for sub-second target remains GPU memory stability/fragmentation under mixed YOLO+VLM load.
