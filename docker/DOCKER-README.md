@@ -5,29 +5,26 @@ Enabling VLM applications on edge devices such as Jetson Orin Nano.
 
 All Docker-related files live under the `docker/` folder:
 
-- `docker/Dockerfile`
-- `docker/Dockerfile.dev`
-- `docker/Dockerfile.jetson`
-- `docker/requirements.txt`
-- `docker/requirements.dev.txt`
-- `docker/requirements.jetson.txt`
+- `docker/Dockerfile` / `docker/Dockerfile.dev` — dev machine images
+- `docker/requirements.txt` / `docker/requirements.dev.txt` — dev machine deps
+- `docker/setup-native-jetson.sh` — **Jetson native install** (recommended for Jetson)
+
+> **Jetson note**: Docker-based GPU inference on Jetson Orin is blocked by a
+> PyTorch NvMap allocator incompatibility (see `JETSON_OPTIMIZATION.md`).
+> Use `docker/setup-native-jetson.sh` for native installation on Jetson instead.
 
 ## Docker environment setup
 
-This project uses two Docker images:
+This project uses Docker for dev-machine development:
 
 - `docker/Dockerfile` or `docker/Dockerfile.dev` for the main development machine
-- `docker/Dockerfile.jetson` for Jetson verification
-
-Both Dockerfiles can live in the same folder. Choose which one to build with `-f`.
+- For Jetson, use `docker/setup-native-jetson.sh` (native, no Docker)
 
 Current convention:
 
 - `docker/Dockerfile` is the default dev-machine Dockerfile
 - `docker/Dockerfile.dev` is the explicit dev-machine Dockerfile
-- `docker/Dockerfile.jetson` is the Jetson-only Dockerfile
 - `docker/requirements.dev.txt` is the dev-machine Python dependency set
-- `docker/requirements.jetson.txt` is the Jetson Python dependency set
 - `docker/requirements.txt` mirrors the dev dependency set for compatibility and quick inspection
 
 Helper scripts (`build-docker-*`, `run-docker-*`) live in `docker/`. They **change to the repository root** (parent of `docker/`) before running `docker build` or `docker run`, so paths like `-f docker/Dockerfile.dev` and the volume mount for `/app` stay correct whether you run them from the repo root, from `docker/`, or by double-clicking on Windows.
@@ -60,18 +57,14 @@ Windows:
 .\docker\build-docker-dev-machine.bat
 ```
 
-### Build on the Jetson
-
-Run this from the project root directory on the Jetson:
+### Install on Jetson (native, no Docker)
 
 ```bash
-docker build --pull -t vision-jetson:latest -f docker/Dockerfile.jetson docker
-```
+# Installs torch 2.8.0 (CUDA 12.6 wheel) + all pipeline deps
+bash docker/setup-native-jetson.sh
 
-Helper script:
-
-```bash
-./docker/build-docker-jetson
+# Run benchmark
+BENCH_CONFIG_YAML=src/configuration-layer/config.jetson.yaml python3 benchmark.py
 ```
 
 ### Run the dev-machine container
@@ -112,20 +105,6 @@ Helper script:
 .\docker\run-docker-win.bat
 ```
 
-### Run the Jetson container
-
-On the Jetson:
-
-```bash
-docker run -it --runtime=nvidia -v ${PWD}:/app vision-jetson:latest bash
-```
-
-Helper script:
-
-```bash
-./docker/run-docker-jetson
-```
-
 ### Hugging Face CLI
 
 Inside either container, the Hugging Face CLI should be available:
@@ -144,8 +123,8 @@ huggingface-cli login
 
 1. Build `vision-dev:latest` on the dev machine.
 2. Edit and iterate locally.
-3. Build `vision-jetson:latest` on the Jetson.
-4. Validate YOLO, VLM, GPU, and deployment behavior on the Jetson.
+3. On Jetson, run `bash docker/setup-native-jetson.sh` (native install).
+4. Validate YOLO, VLM, GPU, and deployment behavior on the Jetson using `config.jetson.yaml`.
 
 ### Visualization and VLM demos on the host
 
@@ -161,6 +140,6 @@ The bundled Qwen3.5 VLM weights require **`transformers` 5.x** (`model_type` `qw
 - `run-docker-jetson` requests GPU access with `--runtime=nvidia`, which is the Jetson-compatible runtime setting.
 - `run-docker-linux` and `run-docker-win.bat` request GPU passthrough with `--gpus all`.
 - `run-docker-mac` intentionally runs without GPU flags.
-- On Linux and Jetson, run `chmod +x docker/build-docker-dev-machine docker/build-docker-jetson docker/run-docker-linux docker/run-docker-mac docker/run-docker-jetson` once after cloning if execute bits are missing.
+- On Linux, run `chmod +x docker/build-docker-dev-machine docker/run-docker-linux docker/run-docker-mac` once after cloning if execute bits are missing.
 - The dev image installs `opencv-python` from pip.
 - The Jetson image installs `python3-opencv` from apt and avoids the pip OpenCV wheel to reduce Jetson-specific `cv2` conflicts.
