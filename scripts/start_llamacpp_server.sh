@@ -43,18 +43,46 @@ if [[ ! -f "${MMPROJ}" ]]; then
     exit 1
 fi
 
-echo "Starting llama-server (Gemma-4-E2B Q4_K_M, 22/36 GPU layers, mmproj on CPU) on port ${PORT}..."
+echo "Starting llama-server (Gemma-4-E2B Q4_K_M, 36/36 GPU layers) on port ${PORT}..."
 echo "Model:  ${MODEL}"
-echo "Mmproj: ${MMPROJ} [CPU-only, NvMap budget constraint]"
+echo "Mmproj: ${MMPROJ} [weights on CPU, compute on GPU via flash-attn]"
 echo ""
 
-# LLAMA_ARG_MMPROJ_OFFLOAD=0 keeps the vision encoder (mmproj) on CPU so the
-# NvMap IOVMM budget (~1500 MiB) is reserved for text-model weights + compute buffers.
-exec env LLAMA_ARG_MMPROJ_OFFLOAD=0 "${LLAMA_SERVER}" \
+# Memory strategy (empirically validated on Jetson Orin Nano, post-reboot):
+#
+#   GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
+#     Switches GPU buffer allocation from cudaMalloc → cudaMallocManaged.
+#     cudaMallocManaged uses non-contiguous physical pages (bypasses NvMap IOVMM
+#     contiguous block limit), allowing the full 4-6 GB unified memory pool.
+#     Without this, a single 544 MiB cudaMalloc for the compute buffer fails after
+#     1416 MiB of model weights are loaded (NvMap contiguous limit ~1.9 GB).
+#
+#   --no-mmap
+#     Forces each tensor to be allocated individually via ggml_cuda_device_malloc
+#     (which respects GGML_CUDA_ENABLE_UNIFIED_MEMORY).  With mmap (default) the
+#     GPU weight buffer is allocated as ONE large contiguous cudaMalloc block,
+#     bypassing the unified-memory path and hitting the NvMap contiguous limit.
+#
+#   --no-mmproj-offload
+#     Keeps the CLIP/mmproj vision-encoder weights on CPU.  The mmproj GPU weight
+#     buffer (~216 MiB) would be the last allocation to fail even when everything
+#     else fits, because it is a separate cudaMalloc outside the unified-memory
+#     path.  Moving it to CPU avoids this.  Image encoding runs on CPU (6 threads),
+#     text generation on full GPU (36/36 layers).
+#
+#   --flash-attn on
+#     Reduces KV-cache from ~100 MiB → ~3 MiB (2048 ctx) and slightly shrinks the
+#     compute-buffer footprint (544 → 538 MiB), giving the allocation just enough
+#     headroom to succeed.
+
+exec env GGML_CUDA_ENABLE_UNIFIED_MEMORY=1 "${LLAMA_SERVER}" \
     --model "${MODEL}" \
     --mmproj "${MMPROJ}" \
-    --n-gpu-layers 22 \
+    --n-gpu-layers 99 \
     --ctx-size 2048 \
+    --flash-attn on \
+    --no-mmproj-offload \
+    --no-mmap \
     --threads 6 \
     --threads-batch 6 \
     --cache-type-k q4_0 \
