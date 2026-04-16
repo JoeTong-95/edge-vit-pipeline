@@ -576,20 +576,10 @@ def main() -> None:
         roi_pkg = build_roi_layer_package(input_pkg)
         t_roi1 = time.perf_counter()
 
-        dets_boot = run_yolo_detection(roi_pkg if roi_pkg.get("roi_layer_locked") else input_pkg)
-        dets_boot = filter_yolo_detections(dets_boot)
-        roi_state = update_roi_state(input_pkg, dets_boot)
-        roi_last_candidate_count = int(roi_state.get("roi_candidate_box_count", 0))
-        roi_last_locked = bool(roi_state.get("roi_layer_locked", False))
-        bounds = roi_state.get("roi_layer_bounds")
-        roi_last_bounds = tuple(int(v) for v in bounds) if bounds is not None else None
-        roi_pkg = build_roi_layer_package(input_pkg)
-        if roi_lock_frame_id is None and roi_last_locked:
-            roi_lock_frame_id = int(input_pkg["input_layer_frame_id"])
-            roi_lock_candidate_count = roi_last_candidate_count
-            if roi_last_bounds is not None:
-                roi_lock_bounds = roi_last_bounds
-
+        # Single YOLO call per frame: result feeds both the pipeline and ROI state.
+        # Before ROI lock: runs on the full frame (same input update_roi_state needs).
+        # After ROI lock: update_roi_state is a no-op (returns immediately), so the
+        # previous pattern of a separate dets_boot YOLO call was entirely wasted.
         t_y0 = time.perf_counter()
         yolo_using_roi = bool(roi_enabled and roi_pkg.get("roi_layer_locked"))
         yolo_upstream = roi_pkg if yolo_using_roi else input_pkg
@@ -605,6 +595,18 @@ def main() -> None:
         t_inf1 = time.perf_counter()
         dets = filter_yolo_detections(dets)
         yolo_pkg = build_yolo_layer_package(input_pkg["input_layer_frame_id"], dets)
+
+        # Update ROI state with this frame's detections for next frame's ROI crop.
+        roi_state = update_roi_state(input_pkg, dets)
+        roi_last_candidate_count = int(roi_state.get("roi_candidate_box_count", 0))
+        roi_last_locked = bool(roi_state.get("roi_layer_locked", False))
+        bounds = roi_state.get("roi_layer_bounds")
+        roi_last_bounds = tuple(int(v) for v in bounds) if bounds is not None else None
+        if roi_lock_frame_id is None and roi_last_locked:
+            roi_lock_frame_id = int(input_pkg["input_layer_frame_id"])
+            roi_lock_candidate_count = roi_last_candidate_count
+            if roi_last_bounds is not None:
+                roi_lock_bounds = roi_last_bounds
         t_y1 = time.perf_counter()
         yolo_dt = t_y1 - t_y0
         yolo_infer_dt = t_inf1 - t_inf0
