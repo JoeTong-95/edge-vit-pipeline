@@ -55,6 +55,12 @@ BENCH_OVERRIDE_VLM_BATCH_SIZE: int | None = None
 WARMUP_FRAMES = 3
 MEASURED_FRAMES = 30
 
+# Allow overriding the config file path via environment variable so different
+# Jetson-optimized configs can be tested without editing this file.
+# Example:
+#   BENCH_CONFIG_YAML=/app/src/configuration-layer/config.jetson.yaml python3 benchmark.py
+_config_yaml_override = os.environ.get("BENCH_CONFIG_YAML", "").strip()
+
 CONFIG_DIR = SRC_DIR / "configuration-layer"
 INPUT_DIR = SRC_DIR / "input-layer"
 ROI_DIR = SRC_DIR / "roi-layer"
@@ -266,7 +272,7 @@ def main() -> None:
         initialize_scene_awareness_layer = None  # type: ignore
         run_scene_awareness_inference = None  # type: ignore
 
-    config_path = CONFIG_DIR / "config.yaml"
+    config_path = Path(_config_yaml_override) if _config_yaml_override else CONFIG_DIR / "config.yaml"
     cfg = load_config(config_path)
     validate_config(cfg)
 
