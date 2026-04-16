@@ -63,6 +63,7 @@ TRACKING_DIR = SRC_DIR / "tracking-layer"
 VSTATE_DIR = SRC_DIR / "vehicle-state-layer"
 SCENE_DIR = SRC_DIR / "scene-awareness-layer"
 VLM_DIR = SRC_DIR / "vlm-layer"
+VLM_UTIL_DIR = VLM_DIR / "util"
 CROPPER_DIR = SRC_DIR / "vlm-frame-cropper-layer"
 
 for p in (
@@ -74,6 +75,7 @@ for p in (
     VSTATE_DIR,
     SCENE_DIR,
     VLM_DIR,
+    VLM_UTIL_DIR,
     CROPPER_DIR,
 ):
     if p.exists():
