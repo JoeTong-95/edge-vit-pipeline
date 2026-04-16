@@ -35,6 +35,16 @@ def _normalize_resolution(value: Any) -> tuple[int, int]:
     raise TypeError("config_frame_resolution must be a two-item resolution value.")
 
 
+def _normalize_yolo_imgsz(value: Any) -> tuple[int, int] | None:
+    if value is None or value == "" or value == []:
+        return None
+    if isinstance(value, Iterable) and not isinstance(value, (str, bytes, dict)):
+        parts = list(value)
+        if len(parts) == 2:
+            return (int(parts[0]), int(parts[1]))
+    raise TypeError("config_yolo_imgsz must be a [H, W] pair or null.")
+
+
 def normalize_config(raw_config: dict[str, Any]) -> ConfigurationLayerConfig:
     merged = {**DEFAULT_CONFIG_VALUES, **raw_config}
 
@@ -49,6 +59,7 @@ def normalize_config(raw_config: dict[str, Any]) -> ConfigurationLayerConfig:
         config_roi_vehicle_count_threshold=int(merged["config_roi_vehicle_count_threshold"]),
         config_yolo_model=str(merged["config_yolo_model"]).strip(),
         config_yolo_confidence_threshold=float(merged["config_yolo_confidence_threshold"]),
+        config_yolo_imgsz=_normalize_yolo_imgsz(merged.get("config_yolo_imgsz")),
         config_vlm_enabled=_normalize_bool(merged["config_vlm_enabled"], "config_vlm_enabled"),
         config_vlm_model=str(merged["config_vlm_model"]).strip(),
         config_vlm_device=str(merged.get("config_vlm_device") or "").strip().lower(),

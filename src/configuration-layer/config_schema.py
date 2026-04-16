@@ -9,6 +9,7 @@ CONFIG_ALLOWED_KEYS = {
     "config_roi_vehicle_count_threshold",
     "config_yolo_model",
     "config_yolo_confidence_threshold",
+    "config_yolo_imgsz",
     "config_vlm_enabled",
     "config_vlm_model",
     "config_vlm_device",
