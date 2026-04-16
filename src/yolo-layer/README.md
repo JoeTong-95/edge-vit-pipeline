@@ -9,7 +9,7 @@ This layer owns vehicle detection and produces the documented `yolo_layer_packag
 - `TAG_FILTER_BEHAVIOR.md`: explains exactly which YOLO tags are currently forwarded downstream and how editing `class_map.py` changes pipeline behavior
 - `util/visualize_yolo.py`: config-driven visualization helper for YOLO-only runs
 - `test/test_yolo_layer.py`: layer-local test script
-- `models/`: bundled local weights such as `yolov8n.pt`, `yolov10n.pt`, and `yolo11n.pt`
+- `models/`: bundled local weights such as `yolov8n.pt`, `yolov10n.pt`, `yolov11n.pt`, and `yolov11v28_jingtao.pt`
 
 ## Public API
 
@@ -49,7 +49,7 @@ If `--save-metrics` is enabled, the script stores run metadata and frame-level m
 ## Notes
 
 - Bundled local weights are preferred before Ultralytics falls back to external lookup.
-- The bundled COCO-pretrained models know many classes, but this layer currently forwards only the project target classes from `class_map.py`: `car`, `bus`, and `truck`. This is intentional so SUV-like vehicles, pickups, and vans that COCO collapses into `car` still reach downstream logic.
+- `class_map.py` is model-specific policy, not a universal COCO truth table. The current active map is tuned for `yolov11v28_jingtao.pt`, which uses a custom vehicle taxonomy (`pickup_truck`, `bus`, `van`, `tow_truck`, `semi_truck`, `box_truck`, `dump_truck`) rather than COCO IDs.
 - `TAG_FILTER_BEHAVIOR.md` is the explicit reference for what is detected versus discarded in the current repo. Editing `class_map.py` changes detector policy for the Python pipeline and visualizers accordingly.
 - `cuda` only works if the active Python environment has CUDA-enabled PyTorch.
 - The visualizer writes an annotated MP4 by default and can also show a live preview window.
@@ -57,6 +57,12 @@ If `--save-metrics` is enabled, the script stores run metadata and frame-level m
 - When YOLO receives an active locked `roi_layer_image`, it now uses the crop's native image shape as the inference size instead of silently falling back to the model's default `imgsz`. This makes ROI-cropped inputs materially different from full-frame inputs in performance terms.
 
 ## Changes
+
+## 2026-04-16
+
+- Added bundled custom checkpoint `src/yolo-layer/models/yolov11v28_jingtao.pt`.
+- Updated `class_map.py` so the active forwarded classes match the Jingtao checkpoint taxonomy instead of the previous COCO-style IDs.
+- Kept the previous COCO-style map commented in `class_map.py` for reference so it is still easy to switch back when testing older bundled weights.
 
 ## 2026-04-10
 

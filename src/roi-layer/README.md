@@ -24,6 +24,7 @@ From the project root:
 python src/roi-layer/test/test_roi_layer.py
 python src/roi-layer/util/visualize_roi.py --show
 python src/roi-layer/util/visualize_roi_vlm.py --show
+python src/roi-layer/util/visualize_roi_vlm_upson.py --show
 python src/roi-layer/test/benchmark_roi_yolo.py
 python src/roi-layer/test/roi_study.py
 python src/roi-layer/test/roi_benchmark_matrix.py
@@ -41,6 +42,13 @@ Other config-driven visualizers that read `src/configuration-layer/config.yaml` 
 - once ROI is locked, it runs YOLO only on the ROI crop
 - it then selects one ROI-local detection crop and sends that crop to VLM
 - the visualization shows the calibration phase, the locked ROI view, the selected crop, and the latest VLM result
+
+`util/visualize_roi_vlm_upson.py` is the clip-specific helper for the Upson benchmark/demo video:
+
+- starts at `0:48` and stops at `1:48`
+- keeps the display paced to the source FPS by default so playback looks camera-like
+- keeps the richer ROI -> tracking -> cropper -> VLM status view and box-color semantics from the VLM-layer visualizer path
+- keeps the left display anchored to the original full-frame aspect ratio after ROI lock, while remapping ROI-local tracking boxes back into full-frame coordinates
 
 ## ROI Performance Benchmark
 
@@ -121,6 +129,7 @@ Layer changes in this branch
 - Moved utility scripts into `src/roi-layer/util/` and benchmark/test scripts into `src/roi-layer/test/` so the layer root keeps the pipeline-contract implementation prominent.
 - Added `test/roi_study.py` and `test/roi_benchmark_matrix.py` (moved from `src/evaluation-output-layer/`) for ROI+YOLO isolation and ROI on/off matrix runs against `pipeline/benchmark.py`.
 - Added `ROI_BENCHMARK_NOTES.md` documenting why ROI sometimes appears to provide little YOLO speedup in end-to-end runs, and how to benchmark ROI correctly (post-lock sampling + infer vs post-processing timing).
+- Added `util/visualize_roi_vlm_upson.py`, a clip-specific ROI + tracking + cropper + VLM visualizer for the Upson video window (`0:48` to `1:48`) with source-FPS pacing and a stable full-frame display after ROI lock.
 
 - Added `roi_layer.py` implementing the pipeline contract public API:
   `initialize_roi_layer`, `update_roi_state`, `apply_roi_to_frame`, and
