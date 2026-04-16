@@ -21,6 +21,23 @@ import sys
 import time
 from pathlib import Path
 
+# On Jetson unified-memory (NvMap) devices the CUDACachingAllocator can hit
+# internal assertions when it tries to pre-allocate or cache large blocks.
+# Limiting the split size to 128 MB keeps individual NvMap allocations small
+# enough to succeed, while still allowing the full model weight set to be
+# loaded as many smaller chunks.  Must be set before any CUDA init.
+if "PYTORCH_CUDA_ALLOC_CONF" not in os.environ:
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
+
+# Enable cuDNN auto-tuner so it selects the fastest convolution algorithm for
+# each fixed input shape encountered during the run. This is a net win for
+# the .pt (eager PyTorch) YOLO path and is a no-op for TensorRT engines.
+try:
+    import torch
+    torch.backends.cudnn.benchmark = True
+except Exception:
+    pass
+
 
 REPO_ROOT = Path(__file__).resolve().parent
 SRC_DIR = REPO_ROOT / "src"
@@ -54,6 +71,12 @@ BENCH_OVERRIDE_VLM_BATCH_SIZE: int | None = None
 # Fallback (frame-count mode). Used only if MEASURE_SECONDS <= 0.
 WARMUP_FRAMES = 3
 MEASURED_FRAMES = 30
+
+# Allow overriding the config file path via environment variable so different
+# Jetson-optimized configs can be tested without editing this file.
+# Example:
+#   BENCH_CONFIG_YAML=/app/src/configuration-layer/config.jetson.yaml python3 benchmark.py
+_config_yaml_override = os.environ.get("BENCH_CONFIG_YAML", "").strip()
 
 CONFIG_DIR = SRC_DIR / "configuration-layer"
 INPUT_DIR = SRC_DIR / "input-layer"
@@ -266,7 +289,7 @@ def main() -> None:
         initialize_scene_awareness_layer = None  # type: ignore
         run_scene_awareness_inference = None  # type: ignore
 
-    config_path = CONFIG_DIR / "config.yaml"
+    config_path = Path(_config_yaml_override) if _config_yaml_override else CONFIG_DIR / "config.yaml"
     cfg = load_config(config_path)
     validate_config(cfg)
 
@@ -284,6 +307,8 @@ def main() -> None:
     device = str(get_config_value(cfg, "config_device"))
     model = str(get_config_value(cfg, "config_yolo_model"))
     conf = float(get_config_value(cfg, "config_yolo_confidence_threshold"))
+    _yolo_imgsz_raw = get_config_value(cfg, "config_yolo_imgsz")
+    yolo_imgsz = tuple(int(x) for x in _yolo_imgsz_raw) if _yolo_imgsz_raw else None
     roi_enabled = bool(get_config_value(cfg, "config_roi_enabled"))
     if BENCH_OVERRIDE_ROI_ENABLED is not None:
         roi_enabled = bool(BENCH_OVERRIDE_ROI_ENABLED)
@@ -292,6 +317,10 @@ def main() -> None:
 
     vlm_enabled = bool(get_config_value(cfg, "config_vlm_enabled"))
     vlm_model = str(get_config_value(cfg, "config_vlm_model"))
+    # config_vlm_device overrides config_device for the VLM only.
+    # Empty string means inherit from config_device (default behaviour).
+    _vlm_device_override = str(get_config_value(cfg, "config_vlm_device") or "").strip()
+    vlm_device = _vlm_device_override if _vlm_device_override else device
     vlm_crop_cache_size = int(get_config_value(cfg, "config_vlm_crop_cache_size"))
     vlm_dead_after_lost_frames = int(get_config_value(cfg, "config_vlm_dead_after_lost_frames"))
     vlm_worker_batch_wait_ms = int(get_config_value(cfg, "config_vlm_worker_batch_wait_ms"))
@@ -343,6 +372,7 @@ def main() -> None:
     _p("vlm_enabled", str(vlm_enabled))
     _p("vlm_model", _resolve_repo_path(vlm_model) if vlm_model else "none")
     if vlm_enabled:
+        _p("vlm_device", vlm_device)
         _p("vlm_benchmark_batch_size", str(int(vlm_bench_batch_size)))
         _p("vlm_benchmark_runtime_mode_intent", vlm_runtime_mode_intent)
     if use_time_budget:
@@ -360,7 +390,7 @@ def main() -> None:
     )
 
     initialize_roi_layer(config_roi_enabled=roi_enabled, config_roi_vehicle_count_threshold=roi_threshold)
-    initialize_yolo_layer(model_name=model, conf_threshold=conf, device=device)
+    initialize_yolo_layer(model_name=model, conf_threshold=conf, device=device, imgsz=yolo_imgsz)
     initialize_tracking_layer(frame_rate=30)
     initialize_vehicle_state_layer(prune_after_lost_frames=None)
 
@@ -401,7 +431,7 @@ def main() -> None:
                 VLMConfig(
                     config_vlm_enabled=True,
                     config_vlm_model=_resolve_repo_path(vlm_model),
-                    config_device=device,
+                    config_device=vlm_device,
                 )
             )
             vlm_runtime_device = str(getattr(vlm_state, "vlm_runtime_device", "unknown"))
@@ -546,20 +576,10 @@ def main() -> None:
         roi_pkg = build_roi_layer_package(input_pkg)
         t_roi1 = time.perf_counter()
 
-        dets_boot = run_yolo_detection(roi_pkg if roi_pkg.get("roi_layer_locked") else input_pkg)
-        dets_boot = filter_yolo_detections(dets_boot)
-        roi_state = update_roi_state(input_pkg, dets_boot)
-        roi_last_candidate_count = int(roi_state.get("roi_candidate_box_count", 0))
-        roi_last_locked = bool(roi_state.get("roi_layer_locked", False))
-        bounds = roi_state.get("roi_layer_bounds")
-        roi_last_bounds = tuple(int(v) for v in bounds) if bounds is not None else None
-        roi_pkg = build_roi_layer_package(input_pkg)
-        if roi_lock_frame_id is None and roi_last_locked:
-            roi_lock_frame_id = int(input_pkg["input_layer_frame_id"])
-            roi_lock_candidate_count = roi_last_candidate_count
-            if roi_last_bounds is not None:
-                roi_lock_bounds = roi_last_bounds
-
+        # Single YOLO call per frame: result feeds both the pipeline and ROI state.
+        # Before ROI lock: runs on the full frame (same input update_roi_state needs).
+        # After ROI lock: update_roi_state is a no-op (returns immediately), so the
+        # previous pattern of a separate dets_boot YOLO call was entirely wasted.
         t_y0 = time.perf_counter()
         yolo_using_roi = bool(roi_enabled and roi_pkg.get("roi_layer_locked"))
         yolo_upstream = roi_pkg if yolo_using_roi else input_pkg
@@ -575,6 +595,18 @@ def main() -> None:
         t_inf1 = time.perf_counter()
         dets = filter_yolo_detections(dets)
         yolo_pkg = build_yolo_layer_package(input_pkg["input_layer_frame_id"], dets)
+
+        # Update ROI state with this frame's detections for next frame's ROI crop.
+        roi_state = update_roi_state(input_pkg, dets)
+        roi_last_candidate_count = int(roi_state.get("roi_candidate_box_count", 0))
+        roi_last_locked = bool(roi_state.get("roi_layer_locked", False))
+        bounds = roi_state.get("roi_layer_bounds")
+        roi_last_bounds = tuple(int(v) for v in bounds) if bounds is not None else None
+        if roi_lock_frame_id is None and roi_last_locked:
+            roi_lock_frame_id = int(input_pkg["input_layer_frame_id"])
+            roi_lock_candidate_count = roi_last_candidate_count
+            if roi_last_bounds is not None:
+                roi_lock_bounds = roi_last_bounds
         t_y1 = time.perf_counter()
         yolo_dt = t_y1 - t_y0
         yolo_infer_dt = t_inf1 - t_inf0

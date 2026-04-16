@@ -30,3 +30,15 @@ src/vlm-layer/benchmark/*.png
 # Data videos SHOULD be tracked / synced
 # ---------------------------------------------------------------------------
 !data/*.mp4
+
+# ---------------------------------------------------------------------------
+# TRT calibration artifacts (generated locally, large)
+# ---------------------------------------------------------------------------
+data/calib_frames/
+data/calib_frames.cache
+data/*.calib_cache
+*.calib_cache
+
+# Ultralytics model cache
+*.cache
+yolov8n.pt
