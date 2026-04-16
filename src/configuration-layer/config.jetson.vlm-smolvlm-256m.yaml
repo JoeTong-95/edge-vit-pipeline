@@ -14,7 +14,7 @@ config_vlm_model: src/vlm-layer/SmolVLM-256M-Instruct
 config_vlm_device: cuda
 config_vlm_crop_cache_size: 16
 config_vlm_worker_enabled: true
-config_vlm_worker_batch_size: 4
-config_vlm_worker_batch_wait_ms: 100
+config_vlm_worker_batch_size: 1  # 1 = minimal peak activation memory; 4 overflows NvMap with YOLO TRT loaded
+config_vlm_worker_batch_wait_ms: 0  # 0ms wait = lowest first-result latency with batch=1
 config_vlm_query_type: vehicle_semantics_v1
 config_vehicle_state_output_dir: .
