@@ -1,0 +1,39 @@
+# config.jetson.yaml — Jetson-optimized pipeline configuration
+# Branch: jetson-optimization-A
+#
+# Key differences from config.yaml:
+#   - config_yolo_model → TensorRT FP16 engine (3-5x faster, ~70% less VRAM than .pt)
+#   - config_vlm_worker_batch_wait_ms → 50ms (was 24ms): longer wait fills batches
+#     better on Jetson where VLM inference is slower, amortising overhead more
+#   - Everything else kept identical to config.yaml for fair benchmark comparison
+#
+# To use with benchmark.py:
+#   BENCH_CONFIG_YAML=/app/src/configuration-layer/config.jetson.yaml python3 benchmark.py
+#
+# Prerequisite: run docker/export-yolo-trt.sh first to generate the .engine file.
+
+config_device: cuda
+config_input_source: video
+config_input_path: data/upson1.mp4
+config_frame_resolution:
+  - 640
+  - 360
+config_roi_enabled: true
+config_roi_vehicle_count_threshold: 20
+config_yolo_model: src/yolo-layer/models/yolov11v28_jingtao.engine   # TensorRT FP16 engine
+config_yolo_confidence_threshold: 0.4
+config_vlm_enabled: true
+config_vlm_model: src/vlm-layer/Qwen3.5-0.8B
+config_vlm_crop_feedback_enabled: false
+config_vlm_crop_cache_size: 12
+config_vlm_dead_after_lost_frames: 30
+config_vlm_runtime_mode: async
+config_vlm_worker_max_queue_size: 64
+config_vlm_worker_batch_size: 4
+config_vlm_worker_batch_wait_ms: 50
+config_vlm_worker_spill_queue_path: data/vlm_spill_queue.jsonl
+config_vlm_spill_max_file_mb: 512
+config_vlm_realtime_throttle_enabled: true
+config_scene_awareness_enabled: false
+config_metadata_output_enabled: true
+config_evaluation_output_enabled: false
