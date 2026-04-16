@@ -140,7 +140,6 @@ This now uses a rigid short prompt that asks the model to do only two things:
 - decide whether the crop matches one of the currently active YOLO labels such as `truck` or `bus`
 - if yes, return JSON with:
   - `wheel_count`
-  - `estimated_weight_kg`
   - `ack_status`
   - `retry_reasons`
 
@@ -148,7 +147,7 @@ Current notes:
 
 - `truck_type` is no longer part of the active prompt contract
 - model-side `confidence` is no longer requested in the active prompt contract
-- `wheel_count` and `estimated_weight_kg` are now expected as integer values
+- `wheel_count` is expected as an integer value
 - retry explanation is carried only through `retry_reasons`
 
 ## Smoke Test
@@ -394,6 +393,11 @@ an incomplete cache round instead of dropping the track entirely.
 
 Layer changes in this branch
 
+- Removed `estimated_weight_kg` from the active VLM JSON contract. The semantic
+  payload now uses: `is_truck`, `wheel_count`, `ack_status`, and
+  `retry_reasons`.
+- Reduced generation cap from `max_new_tokens=64` to `max_new_tokens=32` to
+  match the slimmer JSON response contract and cut inference latency.
 - Added `measure_vlm_modes.py`: one figure with three mode clusters × four sample videos (`data/sample1.mp4`–`sample4.mp4` by default) + JSON; does not use `benchmark.py`; default output `E:\OneDrive\desktop\vlm-layer`. One VLM load shared across runs.
 
 - Spill queue JSONL: optional size-based rotation before each append (`config_vlm_spill_max_file_mb` → `maybe_rotate_spill_file` in `vlm_deferred_queue.py`; `visualize_vlm_realtime.AsyncVLMWorker` passes the byte limit). Rotated files are named `*.jsonl.rotated.<ms>` next to the active file.
@@ -401,7 +405,7 @@ Layer changes in this branch
 - Simplified the active VLM prompt contract to a short rigid JSON-only format:
   first answer whether the crop matches an active YOLO label such as `truck`
   or `bus`, then if yes return only numeric `wheel_count`,
-  numeric `estimated_weight_kg`, `ack_status`, and `retry_reasons`.
+  `ack_status`, and `retry_reasons`.
 - Removed `vlm_image_quality_notes` from the active VLM contract and kept
   `retry_reasons` as the only structured explanation for bad crops such as
   `occluded` or `bad_angle`.

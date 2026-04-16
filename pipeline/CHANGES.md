@@ -8,3 +8,6 @@
   - `branch-optimizer-log.md`
 - Config-layer documentation was updated with Jetson profile usage and benchmark commands:
   - `src/configuration-layer/README.md`
+- VLM semantic contract trimmed by removing `estimated_weight_kg` while preserving
+  end-to-end package flow and acknowledgement semantics (`is_truck`,
+  `wheel_count`, `ack_status`, `retry_reasons` remain).

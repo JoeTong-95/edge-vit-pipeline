@@ -426,7 +426,6 @@ def build_right_panel(panel_h: int, panel_w: int, focus_track_id: str | None, cr
             json_lines = pretty_json_snippet({
                 'is_truck': normalized.get('is_truck'),
                 'wheel_count': normalized.get('wheel_count'),
-                'estimated_weight_kg': normalized.get('estimated_weight_kg'),
                 'ack_status': normalized.get('vlm_ack_status'),
                 'retry_reasons': normalized.get('vlm_retry_reasons'),
             })
