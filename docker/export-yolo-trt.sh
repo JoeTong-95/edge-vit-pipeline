@@ -62,12 +62,20 @@ model_path = "${pt_file}"
 print(f"  Loading {model_path} ...")
 model = YOLO(model_path)
 
-print(f"  Exporting to TensorRT FP16 (imgsz=${IMGSZ}, batch=${BATCH}) ...")
+# dynamic=True is required because the pipeline uses variable-size ROI crops:
+# when ROI locks, detector.py sets imgsz to the actual crop dimensions
+# (rounded to stride multiples). Without dynamic=True the engine would
+# only accept the exact shape it was built with (640x640) and would fail
+# or silently produce wrong results on any other shape.
+# Dynamic TRT engines are ~5-15% slower than static but still 3-5x
+# faster than eager-PyTorch .pt on Jetson.
+print(f"  Exporting to TensorRT FP16 dynamic (imgsz=${IMGSZ}, batch=${BATCH}) ...")
 export_path = model.export(
     format="engine",
     imgsz=${IMGSZ},
     half=True,
     batch=${BATCH},
+    dynamic=True,         # accept variable spatial dims (needed for ROI crops)
     workspace=4,          # GB of GPU workspace during TRT build
     verbose=False,
 )

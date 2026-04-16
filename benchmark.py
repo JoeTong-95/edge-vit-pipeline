@@ -21,6 +21,15 @@ import sys
 import time
 from pathlib import Path
 
+# Enable cuDNN auto-tuner so it selects the fastest convolution algorithm for
+# each fixed input shape encountered during the run. This is a net win for
+# the .pt (eager PyTorch) YOLO path and is a no-op for TensorRT engines.
+try:
+    import torch
+    torch.backends.cudnn.benchmark = True
+except Exception:
+    pass
+
 
 REPO_ROOT = Path(__file__).resolve().parent
 SRC_DIR = REPO_ROOT / "src"
