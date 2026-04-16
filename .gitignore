@@ -42,3 +42,11 @@ data/*.calib_cache
 # Ultralytics model cache
 *.cache
 yolov8n.pt
+
+# Large model files
+*.gguf
+*.pt
+*.bin
+*.safetensors
+src/vlm-layer/gemma-4-e2b-gguf/
+src/vlm-layer/models/
