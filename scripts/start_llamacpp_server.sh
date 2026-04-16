@@ -56,7 +56,7 @@ echo ""
 # conservative stable starting point.  Increment by 1–2 only after confirming
 # repeatable boot + stable inference.
 #
-#   --n-gpu-layers 10   : ~790 MiB GPU weights + ~510 MiB compute ≈ 1300 MiB total
+#   --n-gpu-layers 13   : ~710 MiB GPU weights + ~532 MiB compute ≈ 1266 MiB total (near ceiling)
 #   -fit off            : skip the auto-fit probe (crashes with abort() on Jetson)
 #   --no-mmproj-offload : keep CLIP vision encoder on CPU (its GPU alloc fails too)
 #   --flash-attn on     : KV cache 100 MiB → 3 MiB (huge reduction)
@@ -65,7 +65,7 @@ echo ""
 exec "${LLAMA_SERVER}" \
     --model "${MODEL}" \
     --mmproj "${MMPROJ}" \
-    --n-gpu-layers 10 \
+    --n-gpu-layers 13 \
     -fit off \
     --ctx-size 2048 \
     --flash-attn on \

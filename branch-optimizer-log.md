@@ -1,4 +1,4 @@
-# Branch Optimizer Log — `jetson-optimization-vlm-latency`
+# Branch Optimizer Log — `jetson-optimization-e2b-llama`
 
 ## Objective
 Maximize deployable Jetson performance with focus on VLM latency and end-to-end responsiveness.
@@ -359,11 +359,43 @@ Max usable transformer layers on GPU with current budget: **~13**
 - Each abort/crash leaves NvMap fragmented even after process exit — **reboot required between attempts**.
 - Model allocation sizes are NOT proportional to n_gpu_layers linearly from 0 — there is ~550 MiB of fixed GPU overhead (embedding + lm_head) always present regardless of layer count.
 
-#### Next steps after clean reboot
-1. Boot with **n=10** (safe: 550+10×24+530 ≈ 1320 MiB) → verify stable + run latency benchmark
-2. If stable: try n=12, then n=13
-3. Stop at first failure; previous value is the stable operating point
-4. Update this log with real latency numbers
+#### Confirmed stable configuration: n=10 GPU layers
+
+**First successful GPU boot.** Server started cleanly after fresh reboot with n=10.
+
+Memory layout observed:
+| Component | Size | Backend |
+|---|---|---|
+| GPU model buffer (10/36 layers) | 662.75 MiB | CUDA0 |
+| GPU compute buffer | 532.50 MiB | CUDA0 |
+| CPU Host compute buffer | 32.80 MiB | CUDA_Host |
+| KV cache (flash-attn) | 10.13 MiB | CPU |
+| CLIP vision encoder | CPU backend | CPU |
+| **Total GPU** | **~1195 MiB** | **fits in ~1400 MiB budget** |
+
+#### Benchmark results — n=10/36 GPU layers (hybrid CPU+GPU)
+| Scenario | Latency | Notes |
+|---|---|---|
+| Cold start (first query) | **28.69s** | mmproj CPU + 26 CPU text layers |
+| Re-query 1 (KV cache warm) | **8.03s** | |
+| Re-query 2 | **7.86s** | |
+| Pure CPU baseline | 8.2s | Previous measurement |
+| **Speedup vs CPU** | **~4%** | Minimal — too few layers on GPU |
+
+**Conclusion:** 10 GPU layers gives negligible speedup. With ~28% of transformer compute on GPU, the CPU-bound layers (26/36) dominate latency. More layers are needed for meaningful improvement.
+
+#### NvMap reboot requirement
+- Each test attempt (success or failure) degrades NvMap such that the next attempt needs a reboot.
+- Even graceful SIGTERM (proper process exit) leaves NvMap fragmented: max single alloc drops from ~1400 MiB fresh to ~500 MiB post-shutdown.
+- This is a Jetson kernel-level NvMap driver behavior — not fixable at application level.
+- **Every layer-count experiment requires a clean reboot.**
+
+#### Next steps after next clean reboot
+1. Try **n=13** (estimated ~1266 MiB total GPU) — closest to budget ceiling
+2. If stable: benchmark and compare to n=10
+3. If n=13 fails: n=11 is the next candidate (estimated ~1219 MiB)
+4. Target: find the maximum stable layer count, benchmark its re-query latency
+5. If max stable layers still gives < 30% speedup vs CPU: reconsider strategy
 
 ### 2026-04-16 — Apple FastVLM-1.5B-int8 test
 - Candidate: `apple/FastVLM-1.5B-int8` (LlavaQwen2 architecture, INT8 quantized).
