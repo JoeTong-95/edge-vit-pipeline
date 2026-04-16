@@ -296,9 +296,16 @@ def build_tracking_layer_package(frame_id, status_tracks):
             "tracking_layer_status": track["status"],
         })
 
+    # Include both nested and flat-array formats so downstream layers
+    # (vehicle_state_layer, vlm_frame_cropper_layer) can use either access style.
     return {
         "tracking_layer_frame_id": frame_id,
         "tracking_layer_tracks": formatted_tracks,
+        "tracking_layer_track_id": [t["tracking_layer_track_id"] for t in formatted_tracks],
+        "tracking_layer_bbox": [t["tracking_layer_bbox"] for t in formatted_tracks],
+        "tracking_layer_detector_class": [t["tracking_layer_detector_class"] for t in formatted_tracks],
+        "tracking_layer_confidence": [t["tracking_layer_confidence"] for t in formatted_tracks],
+        "tracking_layer_status": [t["tracking_layer_status"] for t in formatted_tracks],
     }
 
 

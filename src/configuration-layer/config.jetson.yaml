@@ -20,11 +20,16 @@ config_frame_resolution:
   - 640
   - 360
 config_roi_enabled: true
-config_roi_vehicle_count_threshold: 20
+config_roi_vehicle_count_threshold: 3
 config_yolo_model: yolov11v28_jingtao.pt
 config_yolo_confidence_threshold: 0.4
 config_vlm_enabled: true
 config_vlm_model: src/vlm-layer/Qwen3.5-0.8B
+# VLM runs on CPU: Jetson NvMap carve-out (~1.5 GB) is fully consumed by the
+# VLM weights (1.7 GB), leaving no room for YOLO conv activations.
+# YOLO is latency-critical (every frame) so it keeps GPU.
+# VLM is async (background worker) so CPU latency is acceptable.
+config_vlm_device: cpu
 config_vlm_crop_feedback_enabled: false
 config_vlm_crop_cache_size: 12
 config_vlm_dead_after_lost_frames: 30

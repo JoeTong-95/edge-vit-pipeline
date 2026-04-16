@@ -21,6 +21,14 @@ import sys
 import time
 from pathlib import Path
 
+# On Jetson unified-memory (NvMap) devices the CUDACachingAllocator can hit
+# internal assertions when it tries to pre-allocate or cache large blocks.
+# Limiting the split size to 128 MB keeps individual NvMap allocations small
+# enough to succeed, while still allowing the full model weight set to be
+# loaded as many smaller chunks.  Must be set before any CUDA init.
+if "PYTORCH_CUDA_ALLOC_CONF" not in os.environ:
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
+
 # Enable cuDNN auto-tuner so it selects the fastest convolution algorithm for
 # each fixed input shape encountered during the run. This is a net win for
 # the .pt (eager PyTorch) YOLO path and is a no-op for TensorRT engines.
@@ -307,6 +315,10 @@ def main() -> None:
 
     vlm_enabled = bool(get_config_value(cfg, "config_vlm_enabled"))
     vlm_model = str(get_config_value(cfg, "config_vlm_model"))
+    # config_vlm_device overrides config_device for the VLM only.
+    # Empty string means inherit from config_device (default behaviour).
+    _vlm_device_override = str(get_config_value(cfg, "config_vlm_device") or "").strip()
+    vlm_device = _vlm_device_override if _vlm_device_override else device
     vlm_crop_cache_size = int(get_config_value(cfg, "config_vlm_crop_cache_size"))
     vlm_dead_after_lost_frames = int(get_config_value(cfg, "config_vlm_dead_after_lost_frames"))
     vlm_worker_batch_wait_ms = int(get_config_value(cfg, "config_vlm_worker_batch_wait_ms"))
@@ -358,6 +370,7 @@ def main() -> None:
     _p("vlm_enabled", str(vlm_enabled))
     _p("vlm_model", _resolve_repo_path(vlm_model) if vlm_model else "none")
     if vlm_enabled:
+        _p("vlm_device", vlm_device)
         _p("vlm_benchmark_batch_size", str(int(vlm_bench_batch_size)))
         _p("vlm_benchmark_runtime_mode_intent", vlm_runtime_mode_intent)
     if use_time_budget:
@@ -416,7 +429,7 @@ def main() -> None:
                 VLMConfig(
                     config_vlm_enabled=True,
                     config_vlm_model=_resolve_repo_path(vlm_model),
-                    config_device=device,
+                    config_device=vlm_device,
                 )
             )
             vlm_runtime_device = str(getattr(vlm_state, "vlm_runtime_device", "unknown"))
