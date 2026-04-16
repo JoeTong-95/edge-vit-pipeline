@@ -24,10 +24,10 @@ The emitted JSON is a deterministic, schema-stable dict with these top-level key
 
 ### Usage
 
-Run the smoke demo from this folder:
+Run the layer smoke test from the repo root:
 
 ```bash
-python demo_metadata_output.py
+python src/metadata-output-layer/test/test_metadata_output_layer.py
 ```
 
 To embed in the pipeline:

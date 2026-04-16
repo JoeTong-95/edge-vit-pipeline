@@ -7,7 +7,7 @@ It is currently a **stub** (no committed model). The goal is to provide a stable
 ### Files
 
 - `scene_awareness_layer.py`: layer implementation (public functions live here)
-- `demo_scene_awareness.py`: small runnable demo that builds a fake `input_layer_package`
+- `__init__.py`: exports the public layer functions
 
 ### Public API (contract)
 
