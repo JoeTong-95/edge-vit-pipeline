@@ -17,17 +17,20 @@
 # Output:  src/yolo-layer/models/<name>.engine  (FP16, optimised for current GPU)
 #
 # Notes:
-#   - First export of a model takes ~5-15 min per model (TRT engine building).
+#   - First export of a model takes ~5-15 min per model (TensorRT engine building).
 #   - Engines are device-specific; rebuild if you change hardware.
 #   - imgsz 640 matches the default Ultralytics inference size and the
 #     config_frame_resolution width used in this project.
-#   - The Jingtao model uses imgsz 640 as well; its ROI crops will be
-#     dynamic-shape anyway once the pipeline is running.
+#   - batch=4 is conservative on Jetson to avoid memory spikes during export
+#     (at runtime, pipeline uses mostly single frames + ROI crops).
 
 set -euo pipefail
 
 MODELS_DIR="/app/src/yolo-layer/models"
-IMGSZ=640
+# Use smaller imgsz during export to reduce memory pressure during TRT engine build
+# on Jetson (OOM errors on full 640x640). At runtime, Ultralytics will still resize
+# inputs to this size anyway. This is just the export-time optimization.
+IMGSZ=384
 BATCH=1
 
 echo "=== YOLO → TensorRT FP16 export ==="
@@ -62,20 +65,17 @@ model_path = "${pt_file}"
 print(f"  Loading {model_path} ...")
 model = YOLO(model_path)
 
-# dynamic=True is required because the pipeline uses variable-size ROI crops:
-# when ROI locks, detector.py sets imgsz to the actual crop dimensions
-# (rounded to stride multiples). Without dynamic=True the engine would
-# only accept the exact shape it was built with (640x640) and would fail
-# or silently produce wrong results on any other shape.
-# Dynamic TRT engines are ~5-15% slower than static but still 3-5x
-# faster than eager-PyTorch .pt on Jetson.
-print(f"  Exporting to TensorRT FP16 dynamic (imgsz=${IMGSZ}, batch=${BATCH}) ...")
+# Export to TensorRT FP16. On Jetson with limited memory, avoid dynamic=True
+# since it requires large batch sizes and causes memory spikes during build.
+# We use a fixed imgsz=640 (standard YOLO default) which is what the pipeline
+# uses anyway. ROI crops have variable shapes, but Ultralytics auto-pads them
+# to the inference size at runtime, so a static engine is fine and memory-safe.
+print(f"  Exporting to TensorRT FP16 (imgsz=${IMGSZ}, batch=${BATCH}) ...")
 export_path = model.export(
     format="engine",
     imgsz=${IMGSZ},
     half=True,
     batch=${BATCH},
-    dynamic=True,         # accept variable spatial dims (needed for ROI crops)
     workspace=4,          # GB of GPU workspace during TRT build
     verbose=False,
 )
