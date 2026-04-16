@@ -32,6 +32,7 @@ _state = {
     "target_class_ids": None,
     "device": None,
     "default_imgsz": None,
+    "half": False,
     "initialized": False,
 }
 
@@ -61,18 +62,40 @@ def initialize_yolo_layer(model_name="yolov8n.pt", conf_threshold=0.25, device="
         device: Compute target. "cpu" for laptops, "cuda" for GPU,
                 "cuda:0" for a specific GPU.
     """
+    import numpy as np
+
     resolved_model_name = _resolve_model_path(model_name)
     _state["model"] = YOLO(resolved_model_name)
     _state["conf_threshold"] = conf_threshold
     _state["target_class_ids"] = set(TARGET_CLASSES.keys())
     _state["device"] = device
     _state["default_imgsz"] = _state["model"].overrides.get("imgsz")
+    # Use FP16 on CUDA: halves both weight and activation memory, which is
+    # critical on Jetson where GPU memory must be shared with the VLM model.
+    _state["half"] = device != "cpu"
     _state["initialized"] = True
 
     print(f"[yolo_layer] Loaded model: {resolved_model_name}")
     print(f"[yolo_layer] Device: {device}")
+    print(f"[yolo_layer] Half precision: {_state['half']}")
     print(f"[yolo_layer] Confidence threshold: {conf_threshold}")
     print(f"[yolo_layer] Target classes: {TARGET_CLASSES}")
+
+    if device != "cpu":
+        # On Jetson unified-memory devices, YOLO's AutoBackend predictor is built
+        # lazily on the first inference call.  Loading large CPU models (e.g. VLM)
+        # after this point fills the NvMap carve-out and prevents YOLO from
+        # claiming its CUDA allocation.  Warm up now so CUDA memory is reserved
+        # before any other large model loads.
+        _dummy = np.zeros((360, 640, 3), dtype=np.uint8)
+        _state["model"].predict(
+            _dummy,
+            conf=conf_threshold,
+            device=device,
+            half=_state["half"],
+            verbose=False,
+        )
+        print(f"[yolo_layer] GPU warmup complete")
 
 
 def run_yolo_detection(upstream_package):
@@ -106,6 +129,7 @@ def run_yolo_detection(upstream_package):
     model_kwargs = {
         "conf": _state["conf_threshold"],
         "device": _state["device"],
+        "half": _state.get("half", False),
         "verbose": False,
     }
 

@@ -13,6 +13,7 @@ config_yolo_model: yolov11v28_jingtao.pt                         # ultralytics .
 config_yolo_confidence_threshold: 0.4                            # float [0.0, 1.0]; higher = stricter boxes
 config_vlm_enabled: true                                         # options: true | false
 config_vlm_model: src/vlm-layer/Qwen3.5-0.8B                    # local VLM dir path; required if vlm enabled
+config_vlm_device:                                               # overrides config_device for VLM only; empty = inherit config_device
 config_vlm_crop_feedback_enabled: false                          # options: true | false | caveat: unstable — keep false
 config_vlm_crop_cache_size: 12                                   # int > 0; rolling crops per track before dispatch
 config_vlm_dead_after_lost_frames: 30                            # int > 0; lost streak before track marked dead
