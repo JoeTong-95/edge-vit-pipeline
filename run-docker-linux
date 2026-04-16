@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-set -e
-
-docker run -it --gpus all -v "$(pwd)":/app vision-dev:latest bash

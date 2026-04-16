@@ -1,5 +1,9 @@
 # Pipeline Changes
 
+## 2026-04-15
+
+- Added `pipeline/benchmark.py` (moved from `src/evaluation-output-layer/benchmark.py`): video-only end-to-end profiler that reads `src/configuration-layer/config.yaml`. ROI-specific matrix helpers live under `src/roi-layer/`.
+
 ## 2026-04-11
 
 - Updated pipeline docs to match the simplified active VLM contract used in

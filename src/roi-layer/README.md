@@ -25,6 +25,8 @@ python src/roi-layer/test_roi_layer.py
 python src/roi-layer/visualize_roi.py --show
 python src/roi-layer/visualize_roi_vlm.py --show
 python src/roi-layer/benchmark_roi_yolo.py
+python src/roi-layer/roi_study.py
+python src/roi-layer/roi_benchmark_matrix.py
 python src/roi-layer/render_roi_yolo_gif.py
 python src/roi-layer/save_roi_videos.py
 ```

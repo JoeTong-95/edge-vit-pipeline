@@ -30,6 +30,8 @@ Current convention:
 - `docker/requirements.jetson.txt` is the Jetson Python dependency set
 - `docker/requirements.txt` mirrors the dev dependency set for compatibility and quick inspection
 
+Helper scripts (`build-docker-*`, `run-docker-*`) live in `docker/`. They **change to the repository root** (parent of `docker/`) before running `docker build` or `docker run`, so paths like `-f docker/Dockerfile.dev` and the volume mount for `/app` stay correct whether you run them from the repo root, from `docker/`, or by double-clicking on Windows.
+
 ### Build on the dev machine
 
 Run this from the project root directory:
@@ -49,13 +51,13 @@ Helper scripts:
 Linux:
 
 ```bash
-./build-docker-dev-machine
+./docker/build-docker-dev-machine
 ```
 
 Windows:
 
 ```powershell
-.\build-docker-dev-machine.bat
+.\docker\build-docker-dev-machine.bat
 ```
 
 ### Build on the Jetson
@@ -69,7 +71,7 @@ docker build --pull -t vision-jetson:latest -f docker/Dockerfile.jetson docker
 Helper script:
 
 ```bash
-./build-docker-jetson
+./docker/build-docker-jetson
 ```
 
 ### Run the dev-machine container
@@ -83,7 +85,7 @@ docker run -it --gpus all -v ${PWD}:/app vision-dev:latest bash
 Helper script:
 
 ```bash
-./run-docker-linux
+./docker/run-docker-linux
 ```
 
 macOS:
@@ -95,7 +97,7 @@ docker run -it -v "$(pwd)":/app vision-dev:latest bash
 Helper script:
 
 ```bash
-./run-docker-mac
+./docker/run-docker-mac
 ```
 
 Windows:
@@ -107,7 +109,7 @@ docker run -it --gpus all -v %cd%:/app vision-dev:latest bash
 Helper script:
 
 ```powershell
-.\run-docker-win.bat
+.\docker\run-docker-win.bat
 ```
 
 ### Run the Jetson container
@@ -121,7 +123,7 @@ docker run -it --runtime=nvidia -v ${PWD}:/app vision-jetson:latest bash
 Helper script:
 
 ```bash
-./run-docker-jetson
+./docker/run-docker-jetson
 ```
 
 ### Hugging Face CLI
@@ -159,6 +161,6 @@ The bundled Qwen3.5 VLM weights require **`transformers` 5.x** (`model_type` `qw
 - `run-docker-jetson` requests GPU access with `--runtime=nvidia`, which is the Jetson-compatible runtime setting.
 - `run-docker-linux` and `run-docker-win.bat` request GPU passthrough with `--gpus all`.
 - `run-docker-mac` intentionally runs without GPU flags.
-- On Linux and Jetson, run `chmod +x build-docker-dev-machine build-docker-jetson run-docker-linux run-docker-mac run-docker-jetson` once after cloning if execute bits are missing.
+- On Linux and Jetson, run `chmod +x docker/build-docker-dev-machine docker/build-docker-jetson docker/run-docker-linux docker/run-docker-mac docker/run-docker-jetson` once after cloning if execute bits are missing.
 - The dev image installs `opencv-python` from pip.
 - The Jetson image installs `python3-opencv` from apt and avoids the pip OpenCV wheel to reduce Jetson-specific `cv2` conflicts.

@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import threading
+import time
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -25,7 +26,41 @@ class DeferredVLMTask:
 _FILE_LOCKS: dict[str, threading.Lock] = {}
 
 
-def append_deferred_task(path: str | Path, task: DeferredVLMTask) -> None:
+def maybe_rotate_spill_file(path: str | Path, max_file_bytes: int | None) -> Path | None:
+    """
+    If `path` exists and its size is >= `max_file_bytes`, rename it aside so the next
+    append starts a fresh file. Returns the rotated path, or None if no rotation happened.
+
+    Use this for long-running deployments so the active JSONL does not grow without bound.
+    Rotated files keep the same basename with a `.rotated.<ms>` suffix; delete or archive
+    those separately (e.g. cron) if you need to reclaim disk.
+    """
+    if max_file_bytes is None or int(max_file_bytes) <= 0:
+        return None
+    target = Path(path)
+    if not target.is_file():
+        return None
+    if target.stat().st_size < int(max_file_bytes):
+        return None
+    ms = int(time.time() * 1000)
+    rotated = target.parent / f"{target.name}.rotated.{ms}"
+    for _ in range(10_000):
+        if not rotated.exists():
+            break
+        ms += 1
+        rotated = target.parent / f"{target.name}.rotated.{ms}"
+    else:  # pragma: no cover
+        raise OSError(f"Could not find a free rotated spill filename near {target}")
+    target.rename(rotated)
+    return rotated
+
+
+def append_deferred_task(
+    path: str | Path,
+    task: DeferredVLMTask,
+    *,
+    max_file_bytes: int | None = None,
+) -> None:
     """Append one task as JSONL to `path` (creates parent dirs)."""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -41,6 +76,7 @@ def append_deferred_task(path: str | Path, task: DeferredVLMTask) -> None:
     }
     line = json.dumps(payload, ensure_ascii=False)
     with lock:
+        maybe_rotate_spill_file(target, max_file_bytes)
         with open(target, "a", encoding="utf-8") as f:
             f.write(line + "\n")
 
@@ -109,5 +145,6 @@ __all__ = [
     "decode_crop_image",
     "encode_crop_image_to_png_base64",
     "load_deferred_tasks",
+    "maybe_rotate_spill_file",
 ]
 

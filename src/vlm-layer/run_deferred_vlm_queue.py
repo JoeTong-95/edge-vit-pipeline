@@ -5,6 +5,9 @@ run_deferred_vlm_queue.py
 Offline "cache-and-run" processor for VLM tasks spilled to a JSONL queue.
 
 Input format: lines produced by `vlm_deferred_queue.append_deferred_task(...)`.
+Long runs may split spill output across multiple files: the active queue is rotated
+to `*.jsonl.rotated.<ms>` when `config_vlm_spill_max_file_mb` is set; process each
+file (or glob) through this script as needed.
 Output: a JSONL file with normalized + ack packages per task (plus raw text).
 """
 
