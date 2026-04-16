@@ -390,12 +390,61 @@ Memory layout observed:
 - This is a Jetson kernel-level NvMap driver behavior — not fixable at application level.
 - **Every layer-count experiment requires a clean reboot.**
 
+#### Execution split audit (GPT-recommended verification — 2026-04-16)
+
+Verified actual backend usage per component during live inference:
+
+| Component | Claimed backend | Verified backend | Notes |
+|---|---|---|---|
+| Token embedding layer | CPU | **CPU** | Part of `CPU_Mapped` 2906 MiB buffer |
+| Transformer blocks 0–25 (26 layers) | CPU | **CPU** | `CPU_Mapped model buffer size = 2906.25 MiB` |
+| Transformer blocks 26–34 (9 layers) | GPU | **GPU** | `CUDA0 model buffer size = 662.75 MiB` |
+| Output/LM head layer | GPU | **GPU** | `offloading output layer to GPU` |
+| Tokenizer | CPU | **CPU** | ggml C++ tokenizer, no GPU path |
+| CLIP vision encoder (mmproj) | CPU | **CPU** | `clip_ctx: CLIP using CPU backend` (×2 — weights + compute) |
+| KV cache (all layers) | CPU | **CPU** | `CPU KV buffer size = 3.38 MiB + 6.75 MiB` — `kv_unified = true` forces unified CPU pool |
+| GPU compute buffer | GPU | **GPU** | `CUDA0 compute buffer size = 532.50 MiB` (scratch for 9 GPU layers) |
+| CPU Host compute buffer | CPU | **CPU** | `CUDA_Host compute buffer size = 32.80 MiB` |
+
+**KV cache critical finding**: `kv_unified = true` is set by llama.cpp for hybrid CPU/GPU models. All KV cache lives on CPU — including KV entries for the 9 GPU transformer layers. During GPU-layer attention, KV data must be read from CPU (PCIe roundtrip per layer per token).
+
+#### GPU utilization during actual inference (tegrastats @ 100–200ms intervals)
+
+| Query type | Latency | GPU active samples | GPU idle samples | GPU active % |
+|---|---|---|---|---|
+| Cold start (first query) | 33.6s | 9 / 168 (200ms) | 158 / 168 | **5.4%** |
+| Warm re-query (KV cache hit) | 4.36s | 14 / 52 (100ms) | 38 / 52 | **26.9%** |
+
+**CPU evidence during cold start**: core 5 at 100% for the full 33s. GPU spikes only appear briefly when the 9 top transformer blocks and lm_head execute.
+
+#### Root cause analysis
+
+With 9/35 repeating transformer blocks on GPU:
+- ~25% of attention/FFN FLOPs run on GPU
+- ~75% run on CPU (6 ARM cores @ 1.7GHz)
+- KV cache on CPU adds a PCIe roundtrip for each GPU attention operation
+- The CPU execution of 26 blocks is the bottleneck regardless of GPU presence
+
+GPU usage is low not because of misconfiguration but because **9 GPU layers genuinely represent a small fraction of total per-token compute**. The GPU finishes its 9 layers very fast; the CPU is the bottleneck for the remaining 26.
+
 #### Next steps after next clean reboot
 1. Try **n=13** (estimated ~1266 MiB total GPU) — closest to budget ceiling
-2. If stable: benchmark and compare to n=10
-3. If n=13 fails: n=11 is the next candidate (estimated ~1219 MiB)
-4. Target: find the maximum stable layer count, benchmark its re-query latency
-5. If max stable layers still gives < 30% speedup vs CPU: reconsider strategy
+2. If stable: benchmark and compare to n=10 (expect ~8% more FLOPs on GPU → marginal improvement)
+3. Find max stable n via ladder; stop at first failure
+4. **Decision gate**: if max stable layers still gives < 30% speedup, escalate strategy (see below)
+
+#### Strategic reassessment
+
+| Approach | Status | Realistic latency |
+|---|---|---|
+| n=10 hybrid (current) | Working | ~8s re-query |
+| n=13–15 hybrid (next reboot) | Pending | ~7–7.5s re-query (est.) |
+| Max stable n (~20+) | Blocked by NvMap budget | ~5–6s re-query (est.) |
+| Full GPU (36/36) | Fails — compute buffer OOM | ~1–2s re-query (theoretical) |
+| SmolVLM-256M PyTorch GPU | Already working on other branch | ~6.3s per query |
+| Pure CPU (E2B, all layers CPU) | Working | ~8.2s re-query |
+
+The ~1s target is only achievable with full GPU utilization (all layers on GPU). With NvMap limiting us to ~1400 MiB and the compute buffer taking 532 MiB of that, we can only offload ~13 layers — **not enough to reach 1s**.
 
 ### 2026-04-16 — Apple FastVLM-1.5B-int8 test
 - Candidate: `apple/FastVLM-1.5B-int8` (LlavaQwen2 architecture, INT8 quantized).
