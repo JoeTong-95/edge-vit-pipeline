@@ -236,6 +236,36 @@ Interacts with:
 
 - `input_layer`
 
+#### live_camera_pipeline_test.py
+
+Purpose:
+
+- Local integration test that demonstrates the live camera path flowing end-to-end through `input_layer`, `yolo_layer`, and `tracking_layer`.
+- Opens a USB or CSI camera via `input_layer`, runs YOLO on every frame, runs the tracker, and draws bounding boxes and persistent track IDs in a live preview window.
+
+Why this file lives in `input_layer`:
+
+- The camera hardware path is owned by `input_layer`.
+- The script exercises downstream perception layers as dependencies, but its purpose is to validate that the live camera source reaches the rest of the pipeline correctly.
+- It is not a unit test for any single layer, and it is not a required runtime pipeline component.
+
+Scope:
+
+- Only Layers 2, 4, and 5 are exercised.
+- No ROI, no vehicle state, no VLM, no metadata output.
+- Intended for manual verification on the dev laptop and on the Jetson.
+
+Controls:
+
+- `q`: quit the preview window.
+- `s`: save a screenshot of the current annotated frame to `data/`.
+
+Interacts with:
+
+- `input_layer` (primary)
+- `yolo_layer` (imported for detection)
+- `tracking_layer` (imported for track association and lifecycle)
+
 ### 3. ROI Layer
 
 Purpose:
@@ -1048,6 +1078,3 @@ The next useful document should be a strict layer-to-layer interface table with 
 - required fields
 - optional fields
 - notes
-
-
-
