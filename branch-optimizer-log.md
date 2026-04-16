@@ -173,3 +173,65 @@ GPU is clearly better than CPU for VLM on this Jetson, but we now need to reduce
 - For immediate deployment: stick with **PyTorch SmolVLM-256M** (~6.3s latency)
 - For further optimization: if 6.3s is still too slow, investigate TensorRT Edge-LLM after establishing baseline
 - **Decision point:** is 6.3s acceptable, or proceed with TRT conversion?
+
+---
+
+### 2026-04-16 — NvMap fix: YOLO TRT workspace reduction (inspired by E2B branch)
+
+#### Root cause (carried from E2B branch investigation)
+The `CUDACachingAllocator.cpp:1131` crash when running YOLO + SmolVLM together was **not** a model
+size problem — it was an NvMap IOVMM pool exhaustion problem.
+
+Key facts established on the E2B branch:
+- Jetson Orin Nano Super's NvMap IOVMM pool is effectively **~1400-1500 MiB** of contiguous-capable
+  CUDA memory available to raw `cudaMalloc` callers.
+- YOLO TRT's **default builder workspace is exactly 1025 MiB** (`1<<30` bytes). This is baked into
+  the serialized engine at build time and reserved by the TRT runtime on load, even while idle.
+- PyTorch uses CUDA **virtual memory APIs** (`cuMemCreate`/`cuMemMap`), not raw `cudaMalloc`, so it
+  is NOT bounded by the NvMap pool. SmolVLM's weights load fine. But its forward-pass activation
+  scratch buffers briefly need contiguous NvMap pages — and with YOLO claiming 1025 MiB, there were
+  only ~375 MiB left, causing the crash under batch=4 load.
+
+#### Fix applied
+1. **Rebuilt `yolov11v28_jingtao.engine` with `workspace=256` MB** (vs default 1024 MB):
+   ```python
+   model = YOLO('src/yolo-layer/models/yolov11v28_jingtao.pt')
+   model.export(format='engine', workspace=256, device=0, half=True, imgsz=640)
+   ```
+   - Peak GPU memory during build: **200 MiB** (vs ~1025 MiB with default workspace)
+   - Engine size: 52.1 MB (unchanged — workspace only affects tactic search, not the engine itself)
+   - Old engine backed up as `yolov11v28_jingtao.engine.bak`
+
+2. **Reduced `config_vlm_worker_batch_size` from 4 → 1** in `config.jetson.vlm-smolvlm-256m.yaml`:
+   - Batch=4 caused 4× the peak activation footprint in the vision encoder conv2d
+   - Batch=1 keeps per-query peak memory minimal; throughput is maintained by the async worker queue
+
+#### Benchmark result (post-fix, YOLO + SmolVLM on GPU simultaneously)
+| Metric | Value |
+|---|---|
+| **NvMap crash** | ✅ **GONE** — zero `CUDACachingAllocator` errors |
+| Pipeline FPS | 17.1 fps |
+| YOLO avg ms | 40.15 ms / frame (~24.9 fps capacity) |
+| VLM avg query ms | **4,889 ms** (down from 6,300 ms isolated — warm GPU path) |
+| VLM budget | ≤ 60,026 ms (keeps up comfortably) |
+
+#### Memory budget (post-fix, estimated)
+| Component | NvMap / CUDA | Notes |
+|---|---|---|
+| CUDA runtime init | ~200 MiB | Unavoidable |
+| YOLO TRT workspace (new) | **~256 MiB** | Was 1025 MiB — 769 MiB freed |
+| YOLO TRT weights (runtime) | ~100-150 MiB | 52 MB engine → 2-3× at runtime |
+| SmolVLM weights (PyTorch vmem) | ~500 MiB | Virtual mem API, not NvMap-bounded |
+| SmolVLM activations batch=1 | ~150-200 MiB | Contiguous NvMap alloc |
+| **YOLO + SmolVLM total NvMap** | **~700-850 MiB** | Well within ~1400 MiB pool ✅ |
+
+#### Cross-branch credit
+This fix was directly inspired by the `jetson-optimization-e2b-llama` branch's deep-dive into
+NvMap IOVMM constraints (see that branch's `branch-optimizer-log.md`, section
+"NvMap IOVMM constraint deep-dive"). The E2B branch identified the 1025 MiB workspace default
+as the root cause of all GPU coexistence failures and recommended the `workspace=256` rebuild.
+
+#### Next optimization directions
+- VLM at 4.9s/query is a solid baseline; next target is sub-3s
+- Options: async worker architecture (YOLO at full FPS, VLM in background); prompt/token reduction;
+  or TRT-LLM for the language decoder once YOLO workspace fix is confirmed stable across reboots
