@@ -177,6 +177,48 @@ GPU is clearly better than CPU for VLM on this Jetson, but we now need to reduce
 3. If GPU latency < 11.3s: document as deployment candidate.
 4. If not: revisit SmolVLM-256M TRT path or TRT-LLM conversion.
 
+### 2026-04-16 — Optimization deep-dive (CPU benchmarks, GPU projections)
+
+#### Finding 1: Image size has zero impact on token count
+- Tested 64×64, 128×128, 224×224, 320×240, 448×448 — all produce **~326 prompt tokens**.
+- The mmproj (CLIP, 476M) processes at a fixed native resolution and resizes input internally.
+- Sending smaller images saves nothing. Do not optimize image preprocessing.
+
+#### Finding 2: KV cache reuse is the biggest latency lever
+- When the **same vehicle crop is re-queried** (tracked vehicle), 281/326 tokens are served from KV cache.
+- Re-query latency (CPU): **8.2s** vs **~25s** cold start — **3× faster**.
+- Implication: pipeline's `config_vlm_crop_cache_size` and `config_vlm_dead_after_lost_frames` should be tuned aggressively to avoid re-querying stable classifications.
+- On GPU, re-query: estimated **~1-2s** — within the 1s target range.
+
+#### Finding 3: Thread tuning — marginal
+- 6 threads + 6 batch threads vs 4 threads: prompt speed ~16 vs ~18 tok/s.
+- Not significant at this model size. Applied anyway (free win).
+
+#### Finding 4: KV cache quantization (q4_0) — memory, not speed
+- `--cache-type-k q4_0 --cache-type-v q4_0` reduces KV cache from f16 to int4.
+- Saves ~120 MiB at ctx-size 2048 — critical for fitting compute buffers on GPU after reboot.
+- Applied to start script.
+
+#### Finding 5: Thinking mode suppression — reliable with any system prompt
+- `thinking_budget_tokens: 0` + any non-empty system prompt reliably suppresses Gemma-4 chain-of-thought.
+- Shortest confirmed working: `"Output JSON only."` (3 tokens, minimum system prompt overhead).
+- Inconsistency in earlier tests was KV cache collision from a prior thinking-mode session.
+
+#### Updated performance projections (post-reboot GPU)
+| Scenario | CPU (baseline) | GPU (estimated) |
+|---|---|---|
+| Cold start (new vehicle) | ~25s | ~4-6s |
+| Re-query (tracked vehicle, KV cache) | ~8.2s | **~1-2s** ← hits target |
+| Qwen BF16 GPU (old baseline) | — | 11.3s |
+
+#### Optimized server flags (applied to `scripts/start_llamacpp_server.sh`)
+```
+--n-gpu-layers 99 --ctx-size 2048
+--threads 6 --threads-batch 6
+--cache-type-k q4_0 --cache-type-v q4_0
+--mlock --no-mmap
+```
+
 ### 2026-04-16 — Apple FastVLM-1.5B-int8 test
 - Candidate: `apple/FastVLM-1.5B-int8` (LlavaQwen2 architecture, INT8 quantized).
 - Result: **FAIL** — `llava_qwen2` model type not registered in transformers 5.5.4.
