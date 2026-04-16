@@ -131,7 +131,68 @@ GPU is clearly better than CPU for VLM on this Jetson, but we now need to reduce
   - This model is materially more promising for deployable Jetson use than the blocked 0.8B INT4 attempts.
   - It is still above the long-term `~1 s` target, but much closer than current Qwen3.5 0.8B paths.
 
-### 2026-04-16 — Edge-optimized model probe (Gemma-4-E2B-IT) [TA recommendation]
+### 2026-04-16 — Gemma-4-E2B + llama.cpp INT4 baseline (branch: `jetson-optimization-e2b-llama`)
+
+#### Setup
+- Built llama.cpp from source with CUDA SM87 (`DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=87`).
+- Binary: `/home/jetson/llama.cpp/build/bin/llama-server` (12MB)
+- Model: `lmstudio-community/gemma-4-E2B-it-GGUF` → `gemma-4-E2B-it-Q4_K_M.gguf` (3.2GB)
+- MMproj: `ggml-org/gemma-4-E2B-it-GGUF` → `mmproj-gemma-4-E2B-it-Q8_0.gguf` (532MB)
+
+#### Pipeline integration
+- New `config_vlm_backend` config field: `"pytorch"` (default) or `"llamacpp"`.
+- New `config_vlm_llamacpp_server_url` config field (default `http://localhost:8080`).
+- `initialize_vlm_layer` branches on backend — `llamacpp` health-checks the server, no model loading in Python.
+- `infer_vlm_semantics` / batch: HTTP POST to `/v1/chat/completions` using stdlib only (no new ML deps).
+- Config: `src/configuration-layer/config.jetson.vlm-e2b-llamacpp.yaml`
+- Launch script: `scripts/start_llamacpp_server.sh`
+
+#### GPU memory issue (NvMap fragmentation)
+- With all 36 layers on GPU (`-ngl 99`): weights load OK (1416 MiB), compute buffers fail (537 MiB cudaMalloc OOM).
+- With 20 layers on GPU: weights OK (1031 MiB), compute buffers still fail (~534 MiB).
+- Root cause: session-accumulated NvMap fragmentation from many failed CUDA allocations (bitsandbytes INT4, Qwen, SmolVLM tests). Total free GPU is 4 GB, but no contiguous 534 MiB block is available.
+- **Resolution: Jetson reboot required to clear NvMap state before GPU benchmark.**
+
+#### CPU-only baseline (CUDA_VISIBLE_DEVICES="" — forced, not representative)
+- Context: 2048 tokens, no GPU layers, 4 CPU threads.
+- First inference (cold): **~37s**
+- Subsequent inferences: **~8.2s** (with KV cache hit on image tokens)
+- Real-world (each frame is different): **~34s per query** — worse than Qwen BF16 GPU (11.3s)
+- Token speed: prompt ~18 tok/s, decode ~10 tok/s on CPU.
+- Output: ✓ valid JSON, but requires `thinking_budget_tokens=0` + system prompt to suppress chain-of-thought.
+
+#### Thinking mode
+- Gemma-4-E2B defaults to chain-of-thought reasoning, outputting to `reasoning_content` (not `content`).
+- Fixed in `_infer_llamacpp()`: now passes `thinking_budget_tokens: 0` + system prompt.
+- With fix: model outputs clean JSON directly to `content`.
+
+#### GPU benchmark (pending — requires reboot)
+- Estimated GPU latency at 3-5x CPU speedup: **~7-11s per query**
+- This is comparable to Qwen BF16 GPU (11.3s), not a clear win for latency.
+- Advantage over Qwen: no NvMap allocator crashes; llama.cpp runs as isolated process.
+
+#### Next steps
+1. Reboot Jetson to clear NvMap fragmentation.
+2. Run `bash scripts/start_llamacpp_server.sh` and benchmark GPU path.
+3. If GPU latency < 11.3s: document as deployment candidate.
+4. If not: revisit SmolVLM-256M TRT path or TRT-LLM conversion.
+
+### 2026-04-16 — Apple FastVLM-1.5B-int8 test
+- Candidate: `apple/FastVLM-1.5B-int8` (LlavaQwen2 architecture, INT8 quantized).
+- Result: **FAIL** — `llava_qwen2` model type not registered in transformers 5.5.4.
+- Fix would require upgrading transformers which risks breaking other pipeline dependencies.
+- Decision: skip for now, not worth the risk.
+
+### 2026-04-16 — Gemma-4-E2B-IT via llama.cpp [TA recommendation]
+- Reframed approach based on TA guidance: Gemma-4-E2B is specifically designed for Jetson Orin edge deployment.
+- **NOT PyTorch** — runs via `llama.cpp` (raw C++ with CUDA kernels) or `vLLM`.
+- **Format**: Q4_K_S GGUF (INT4 quantized, 5.0GB), even smaller than INT8.
+- **Why it may be faster than PyTorch path**:
+  - INT4 = half the memory bandwidth of INT8, quarter of FP16
+  - llama.cpp = raw C++ CUDA kernels, no Python/PyTorch overhead, no NvMap issues
+  - Runs as a separate server process → no GPU memory contention with YOLO TRT
+- **Integration pattern**: OpenAI-compatible HTTP API → pipeline calls llama.cpp server locally
+- **Action taken**: Building llama.cpp with CUDA SM87 and downloading Q4_K_S + mmproj in background.
 - Candidate: `google/gemma-4-e2b-it` (Google DeepMind).
 - Rationale: Gemma-4 Edge variants are specifically designed for Jetson Orin deployment with native multimodal support and bfloat16 dtype.
 - Model architecture: native `Gemma4ForConditionalGeneration` with audio + image + text support.
@@ -173,3 +234,32 @@ GPU is clearly better than CPU for VLM on this Jetson, but we now need to reduce
 - For immediate deployment: stick with **PyTorch SmolVLM-256M** (~6.3s latency)
 - For further optimization: if 6.3s is still too slow, investigate TensorRT Edge-LLM after establishing baseline
 - **Decision point:** is 6.3s acceptable, or proceed with TRT conversion?
+
+### 2026-04-16 — TRT FP16 vision encoder acceleration (branch: `jetson-optimization-vlm-smolvlm-256m`)
+
+#### Approach
+- Instead of full TRT-LLM (requires host export + source build), implemented a targeted approach:
+  - **Export only the SigLIP vision encoder** (ViT 12L, 512×512 input, 1024 patches, hidden=768) to ONNX, then build a TRT FP16 engine.
+  - Patch `model.model.vision_model.forward` at runtime to run TRT; LM decoder stays in PyTorch.
+  - Result: zero API changes, zero pipeline contract changes, auto-discovered when engine file present.
+
+#### Files added/changed
+- `scripts/build_trt_smolvlm_vision.py` — ONNX export + TRT FP16 build script (dynamic batch, max=5 tiles).
+- `src/vlm-layer/layer.py` — `_maybe_load_trt_vision_engine()`, `_make_trt_vision_forward()` patch helpers; `VLMConfig.config_vlm_trt_vision_engine` field; `VLMRuntimeState.vlm_runtime_trt_context` field.
+- `src/configuration-layer/config.jetson.vlm-smolvlm-256m-trt.yaml` — deployment config for TRT path.
+- Config schema/types/normalizer/defaults updated with `config_vlm_trt_vision_engine`.
+
+#### To run the TRT build
+```bash
+cd /home/jetson/Desktop/edge-vit-pipeline
+python3 scripts/build_trt_smolvlm_vision.py \
+    --model src/vlm-layer/SmolVLM-256M-Instruct \
+    --engine src/vlm-layer/SmolVLM-256M-Instruct/vision_encoder_fp16.trt
+```
+Then benchmark with `config.jetson.vlm-smolvlm-256m-trt.yaml`.
+
+#### Expected outcome
+- Vision encoder step: ~1.5–2.5× speedup (TRT FP16 kernel fusion vs PyTorch bfloat16).
+- End-to-end VLM query: ~15–25% improvement (encoder is ~25–35% of total query time with 32-token decode).
+- Target: ~5s/query (down from ~6.3s).
+- Next step if still above target: investigate TRT-LLM for the decoder as well.

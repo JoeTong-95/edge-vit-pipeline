@@ -1,0 +1,53 @@
+# config.jetson.vlm-e2b-llamacpp.yaml — E2B + llama.cpp INT4 VLM backend
+# Branch: jetson-optimization-e2b-llama
+#
+# VLM backend: llama.cpp (llamacpp) serving Gemma-4-E2B-it Q4_K_M via HTTP API.
+#
+# Why llama.cpp instead of PyTorch:
+#   - Gemma-4-E2B GGUF is INT4 (Q4_K_M): 0.5 bytes/weight vs 2 bytes for BF16.
+#     Lower memory bandwidth = faster on Jetson's unified memory architecture.
+#   - llama.cpp uses raw C++ CUDA kernels — no Python/PyTorch overhead, no NvMap
+#     allocator conflicts that caused Qwen3.5-0.8B BF16 crashes.
+#   - Server runs as a separate process: GPU memory isolated from YOLO TRT.
+#   - OpenAI-compatible HTTP API — zero new Python ML dependencies in the pipeline.
+#
+# Before starting the pipeline, launch the server:
+#   bash scripts/start_llamacpp_server.sh
+#
+# Model files (must be present):
+#   src/vlm-layer/gemma-4-e2b-gguf/gemma-4-E2B-it-Q4_K_M.gguf   (~3.2 GB)
+#   src/vlm-layer/gemma-4-e2b-gguf/mmproj-gemma-4-E2B-it-Q8_0.gguf  (~532 MB)
+
+config_device: cuda
+config_input_source: video
+config_input_path: data/upson1.mp4
+config_frame_resolution:
+  - 640
+  - 360
+config_roi_enabled: true
+config_roi_vehicle_count_threshold: 3
+config_yolo_model: yolov11v28_jingtao.engine
+config_yolo_confidence_threshold: 0.4
+config_yolo_imgsz:
+
+config_vlm_enabled: true
+config_vlm_backend: llamacpp
+config_vlm_llamacpp_server_url: http://localhost:8080
+# config_vlm_model is only used for the model_id label in outputs when backend=llamacpp.
+config_vlm_model: src/vlm-layer/gemma-4-e2b-gguf/gemma-4-E2B-it-Q4_K_M.gguf
+config_vlm_device: cuda
+
+config_vlm_crop_feedback_enabled: false
+config_vlm_crop_cache_size: 12
+config_vlm_dead_after_lost_frames: 30
+config_vlm_runtime_mode: async
+config_vlm_worker_max_queue_size: 64
+config_vlm_worker_batch_size: 1
+config_vlm_worker_batch_wait_ms: 50
+config_vlm_worker_spill_queue_path: data/vlm_spill_queue_e2b.jsonl
+config_vlm_spill_max_file_mb: 512
+config_vlm_realtime_throttle_enabled: true
+
+config_scene_awareness_enabled: false
+config_metadata_output_enabled: true
+config_evaluation_output_enabled: false
