@@ -16,6 +16,16 @@ class ConfigurationLayerConfig:
     config_yolo_confidence_threshold: float
     config_vlm_enabled: bool
     config_vlm_model: str
+    config_vlm_crop_feedback_enabled: bool
+    config_vlm_crop_cache_size: int
+    config_vlm_dead_after_lost_frames: int
+    config_vlm_runtime_mode: str
+    config_vlm_worker_max_queue_size: int
+    config_vlm_worker_batch_size: int
+    config_vlm_worker_batch_wait_ms: int
+    config_vlm_worker_spill_queue_path: str
+    config_vlm_spill_max_file_mb: float
+    config_vlm_realtime_throttle_enabled: bool
     config_scene_awareness_enabled: bool
     config_metadata_output_enabled: bool
     config_evaluation_output_enabled: bool
