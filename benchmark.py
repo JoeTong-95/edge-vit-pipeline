@@ -307,6 +307,8 @@ def main() -> None:
     device = str(get_config_value(cfg, "config_device"))
     model = str(get_config_value(cfg, "config_yolo_model"))
     conf = float(get_config_value(cfg, "config_yolo_confidence_threshold"))
+    _yolo_imgsz_raw = get_config_value(cfg, "config_yolo_imgsz")
+    yolo_imgsz = tuple(int(x) for x in _yolo_imgsz_raw) if _yolo_imgsz_raw else None
     roi_enabled = bool(get_config_value(cfg, "config_roi_enabled"))
     if BENCH_OVERRIDE_ROI_ENABLED is not None:
         roi_enabled = bool(BENCH_OVERRIDE_ROI_ENABLED)
@@ -388,7 +390,7 @@ def main() -> None:
     )
 
     initialize_roi_layer(config_roi_enabled=roi_enabled, config_roi_vehicle_count_threshold=roi_threshold)
-    initialize_yolo_layer(model_name=model, conf_threshold=conf, device=device)
+    initialize_yolo_layer(model_name=model, conf_threshold=conf, device=device, imgsz=yolo_imgsz)
     initialize_tracking_layer(frame_rate=30)
     initialize_vehicle_state_layer(prune_after_lost_frames=None)
 

@@ -32,6 +32,7 @@ _state = {
     "target_class_ids": None,
     "device": None,
     "default_imgsz": None,
+    "forced_imgsz": None,  # explicit (H, W) override for TRT engines with non-square shapes
     "half": False,
     "is_trt": False,  # TRT engines have a fixed input shape; skip dynamic imgsz
     "initialized": False,
@@ -45,7 +46,7 @@ _MODEL_DIR = _LAYER_DIR / "models"
 # Public functions (spec-defined)
 # ---------------------------------------------------------------------------
 
-def initialize_yolo_layer(model_name="yolov8n.pt", conf_threshold=0.25, device="cpu"):
+def initialize_yolo_layer(model_name="yolov8n.pt", conf_threshold=0.25, device="cpu", imgsz=None):
     """
     Load the configured YOLO model and store layer settings.
 
@@ -77,12 +78,16 @@ def initialize_yolo_layer(model_name="yolov8n.pt", conf_threshold=0.25, device="
     # TRT engines are compiled for a fixed input shape; dynamic ROI imgsz is not
     # supported and will raise an assertion error inside TRT inference.
     _state["is_trt"] = str(resolved_model_name).endswith(".engine")
+    # Explicit imgsz override for TRT engines compiled at non-square resolutions
+    # (e.g. INT8 engine at 384x640). None means use model default.
+    _state["forced_imgsz"] = tuple(imgsz) if imgsz else None
     _state["initialized"] = True
 
     print(f"[yolo_layer] Loaded model: {resolved_model_name}")
     print(f"[yolo_layer] Device: {device}")
     print(f"[yolo_layer] Half precision: {_state['half']}")
     print(f"[yolo_layer] Confidence threshold: {conf_threshold}")
+    print(f"[yolo_layer] Forced imgsz: {_state['forced_imgsz']}")
     print(f"[yolo_layer] Target classes: {TARGET_CLASSES}")
 
     if device != "cpu":
@@ -91,15 +96,13 @@ def initialize_yolo_layer(model_name="yolov8n.pt", conf_threshold=0.25, device="
         # after this point fills the NvMap carve-out and prevents YOLO from
         # claiming its CUDA allocation.  Warm up now so CUDA memory is reserved
         # before any other large model loads.
-        _dummy = np.zeros((360, 640, 3), dtype=np.uint8)
-        _state["model"].predict(
-            _dummy,
-            conf=conf_threshold,
-            device=device,
-            half=_state["half"],
-            verbose=False,
-        )
-        print(f"[yolo_layer] GPU warmup complete")
+        _h, _w = _state["forced_imgsz"] if _state["forced_imgsz"] else (640, 640)
+        _dummy = np.zeros((_h, _w, 3), dtype=np.uint8)
+        _warmup_kwargs = {"conf": conf_threshold, "device": device, "half": _state["half"], "verbose": False}
+        if _state["forced_imgsz"]:
+            _warmup_kwargs["imgsz"] = _state["forced_imgsz"]
+        _state["model"].predict(_dummy, **_warmup_kwargs)
+        print(f"[yolo_layer] GPU warmup complete ({_h}x{_w})")
 
 
 def run_yolo_detection(upstream_package):
@@ -136,6 +139,8 @@ def run_yolo_detection(upstream_package):
         "half": _state.get("half", False),
         "verbose": False,
     }
+    if _state.get("forced_imgsz"):
+        model_kwargs["imgsz"] = _state["forced_imgsz"]
 
     roi_enabled = bool(upstream_package.get("roi_layer_enabled", False))
     roi_locked = bool(upstream_package.get("roi_layer_locked", False))

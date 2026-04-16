@@ -9,6 +9,7 @@ DEFAULT_CONFIG_VALUES = {
     "config_roi_vehicle_count_threshold": 5,
     "config_yolo_model": "yolov8n.pt",
     "config_yolo_confidence_threshold": 0.25,
+    "config_yolo_imgsz": None,
     "config_vlm_enabled": False,
     "config_vlm_model": "",
     "config_vlm_device": "",

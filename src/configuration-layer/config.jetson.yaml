@@ -2,11 +2,16 @@
 # Branch: jetson-optimization-A
 #
 # Note on YOLO backend:
-#   Using TensorRT FP16 engine for 2-4× YOLO throughput vs raw .pt inference.
+#   Using TensorRT FP16 engine at 640x640 (SM 8.7 optimal).
+#   INT8 was tested but measured ~20% SLOWER than FP16 in the full pipeline
+#   (11.96 fps INT8 vs 14.95 fps FP16). Root cause: SM 8.7 is memory-bandwidth
+#   bound at this model size — INT8 halves arithmetic but bandwidth savings are
+#   minimal for small activation tensors. FP16 tensor cores are faster here.
+#   FP8 is not supported on SM 8.7 (requires SM 8.9+/Ada).
+#   The INT8 engine + build script (scripts/build_trt_int8.py) are kept for
+#   reference and may be useful for larger batch sizes or bigger models.
 #   Engine was built natively on Jetson (TRT 10.3, CUDA 12.6, SM 8.7).
-#   The engine is device-specific — do NOT copy to x86 machines.
-#   FP8/FP4 are NOT supported on SM 8.7 (require SM 8.9+ / SM 10.0+).
-#   INT8 TRT is supported but requires calibration data — future optimization.
+#   Device-specific — do NOT copy to x86 or other Jetson variants.
 #
 # Key optimizations vs config.yaml:
 #   - YOLO: TensorRT FP16 engine (native Jetson build)
@@ -25,6 +30,7 @@ config_roi_enabled: true
 config_roi_vehicle_count_threshold: 3
 config_yolo_model: yolov11v28_jingtao.engine
 config_yolo_confidence_threshold: 0.4
+config_yolo_imgsz:
 config_vlm_enabled: true
 config_vlm_model: src/vlm-layer/Qwen3.5-0.8B
 # VLM runs on CPU: Jetson NvMap carve-out (~1.5 GB) is fully consumed by the
