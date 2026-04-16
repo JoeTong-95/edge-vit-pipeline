@@ -34,7 +34,23 @@ Common fields:
 - `config_vlm_worker_spill_queue_path`: JSONL path used by spill mode to persist deferred work
 - `config_vlm_spill_max_file_mb`: when greater than zero, rotate the active spill file when it reaches this size (MB) so 24/7 runs do not grow one JSONL forever; use `0` only if you manage disk another way
 - `config_vlm_realtime_throttle_enabled`: when true, realtime visualizers pace the main loop to the source FPS
+- `config_vlm_device`: optional VLM-only device override (`cpu|cuda`). Empty value inherits `config_device`.
+- `config_yolo_imgsz`: optional explicit `[H, W]` inference shape for non-square TRT engines. Empty value uses the model default.
 - `config_roi_enabled`, `config_roi_vehicle_count_threshold`, and other keys as listed in `config_schema.py`
+
+## Jetson Profiles
+
+The repository contains multiple Jetson-focused configs for controlled A/B tests:
+
+- `config.jetson.yaml`: production-oriented baseline (YOLO TRT FP16 on GPU + VLM async on CPU).
+- `config.jetson.vlm-gpu-test.yaml`: VLM forced to GPU for viability/performance testing.
+- `config.jetson.vlm-gpu-lowlat.yaml`: aggressive low-latency VLM tuning profile (batch=1, wait=0, smaller crop cache).
+
+Use with:
+
+```bash
+BENCH_CONFIG_YAML=src/configuration-layer/<profile>.yaml python3 benchmark.py
+```
 
 ## Typical Startup Flow
 
@@ -83,6 +99,8 @@ These scripts read from `config.yaml` by default and let CLI arguments override 
 - Updated the documented bundled YOLO choices to include `yolov11v28_jingtao.pt`.
 - Documented `src/roi-layer/util/visualize_roi_vlm_upson.py` as the clip-specific Upson ROI/VLM helper.
 - `benchmark.py` now resolves `src/vlm-layer/util/` as well, so `config_vlm_runtime_mode=async` can initialize `AsyncVLMWorker` instead of falling back to inline because of an import miss.
+- Added `config_vlm_device` and `config_yolo_imgsz` docs in the common fields list.
+- Added Jetson profile section documenting `config.jetson.yaml`, `config.jetson.vlm-gpu-test.yaml`, and `config.jetson.vlm-gpu-lowlat.yaml` for repeatable VLM latency comparisons.
 
 ## 2026-04-10
 
