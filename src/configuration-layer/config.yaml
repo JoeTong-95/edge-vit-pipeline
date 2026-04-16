@@ -1,15 +1,53 @@
-config_device: cuda
-config_input_source: video
-config_input_path: data/sample.mp4
-config_frame_resolution:
+# Values aligned for reading; YAML forbids tabs after ':' — spaces used to line up notes.
+# Legend: options = allowed values; caveat = known weak or misleading behavior.
+
+config_device: cuda                                              # options: cpu | cuda
+config_input_source: video                                      # options: camera | video
+config_input_path: data/sample3.mp4                             # path: repo-relative or absolute; required if source=video
+config_frame_resolution:                                       # [width, height] positive ints; smaller = less load
   - 640
   - 360
-config_roi_enabled: false
-config_roi_vehicle_count_threshold: 6
-config_yolo_model: yolo11n.pt
-config_yolo_confidence_threshold: 0.25
-config_vlm_enabled: false
-config_vlm_model: "LOL"
-config_scene_awareness_enabled: false
-config_metadata_output_enabled: true
-config_evaluation_output_enabled: false
+config_roi_enabled: true                                        # options: true | false
+config_roi_vehicle_count_threshold: 30                          # int > 0; boxes counted toward ROI lock
+config_yolo_model: yolov10n.pt                                  # ultralytics .pt name/path (speed vs accuracy)
+config_yolo_confidence_threshold: 0.4                            # float [0.0, 1.0]; higher = stricter boxes
+config_vlm_enabled: true                                         # options: true | false
+config_vlm_model: src/vlm-layer/Qwen3.5-0.8B                    # local VLM dir path; required if vlm enabled
+config_vlm_crop_feedback_enabled: false                          # options: true | false | caveat: unstable — keep false
+config_vlm_crop_cache_size: 12                                   # int > 0; rolling crops per track before dispatch
+config_vlm_dead_after_lost_frames: 30                            # int > 0; lost streak before track marked dead
+config_vlm_runtime_mode: async                                   # options: inline | async | spill (see # below)
+config_vlm_worker_max_queue_size: 64                             # int > 0; async/spill only; queue before block/spill
+config_vlm_worker_batch_size: 4                                  # int > 0; microbatch cap; 1 = no batching
+config_vlm_worker_batch_wait_ms: 24                              # int >= 0; ms to wait to fill batch (async/spill)
+config_vlm_worker_spill_queue_path: data/vlm_spill_queue.jsonl    # path; required if mode=spill; JSONL append
+config_vlm_spill_max_file_mb: 512                                # float >= 0; rotate spill file at this MB; 0 = no rotate
+config_vlm_realtime_throttle_enabled: true                       # options: true | false | caveat: visualizer FPS only, not VLM
+config_scene_awareness_enabled: false                           # options: true | false
+config_metadata_output_enabled: true                             # options: true | false
+config_evaluation_output_enabled: false                          # options: true | false
+
+# --- per-key detail (one sentence each) ---
+# config_device — Torch device for YOLO, VLM, and scene layers: cuda uses GPU when available.
+# config_input_source — Selects file-backed video or a live camera as the input layer source.
+# config_input_path — Path to the video file when source is video; must be empty for camera per validation rules.
+# config_frame_resolution — Width and height in pixels for frames delivered to downstream layers.
+# config_roi_enabled — Enables the ROI layer so YOLO can run on a cropped region after lock.
+# config_roi_vehicle_count_threshold — Number of vehicle detections required before ROI is allowed to lock.
+# config_yolo_model — Ultralytics detector checkpoint file name or path controlling model size and classes.
+# config_yolo_confidence_threshold — Minimum detector confidence to keep a detection box.
+# config_vlm_enabled — Turns on VLM model load and semantic inference on vehicle crops.
+# config_vlm_model — Directory path containing the Hugging Face–style VLM weights and config.
+# config_vlm_crop_feedback_enabled — If true, uses VLM ack/retry to refine crops; currently unreliable—leave false.
+# config_vlm_crop_cache_size — How many recent scored crops per track are retained for best-crop selection.
+# config_vlm_dead_after_lost_frames — Consecutive tracker “lost” updates before the cropper treats the track as dead.
+# config_vlm_runtime_mode — inline runs VLM in the frame loop; async uses a worker thread; spill writes overflow to disk.
+# config_vlm_worker_max_queue_size — Maximum pending VLM tasks in memory before blocking or spilling.
+# config_vlm_worker_batch_size — Upper bound on crops combined into one VLM forward pass on the worker.
+# config_vlm_worker_batch_wait_ms — How long the worker waits for more work before running a partial batch.
+# config_vlm_worker_spill_queue_path — JSONL file where queued crops are appended when the queue overflows in spill mode.
+# config_vlm_spill_max_file_mb — Rotates the spill file when it reaches this size; 0 disables rotation (risky for 24/7).
+# config_vlm_realtime_throttle_enabled — Only the realtime visualizer sleeps to match source FPS; it does not cap VLM rate.
+# config_scene_awareness_enabled — Enables the optional scene-awareness inference pass when the layer is present.
+# config_metadata_output_enabled — Enables extra metadata emission where the pipeline implements it.
+# config_evaluation_output_enabled — Enables evaluation or benchmark outputs where the evaluation layer is wired.

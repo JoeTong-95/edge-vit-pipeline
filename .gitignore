@@ -1,9 +1,32 @@
 chat-history/
 
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.pkl
+*.pickle
+
 # Model weights and checkpoints
-*.pt
-*.pth
-*.ckpt
+#*.pt
+#*.pth
+#*.ckpt
 *.onnx
 *.engine
 *.bin
+
+# ---------------------------------------------------------------------------
+# Local run outputs (keep these out of git)
+# ---------------------------------------------------------------------------
+data/pipeline_output.*
+data/*spill*.jsonl
+data/*queue*.jsonl
+data/*.jsonl
+
+# Plots / benchmark artifacts that are regenerated locally
+src/vlm-layer/benchmark/*.png
+
+# ---------------------------------------------------------------------------
+# Data videos SHOULD be tracked / synced
+# ---------------------------------------------------------------------------
+!data/*.mp4

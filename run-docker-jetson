@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-set -e
-
-docker run -it --runtime=nvidia -v "$(pwd)":/app vision-jetson:latest bash
