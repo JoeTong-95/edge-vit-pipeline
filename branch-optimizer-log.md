@@ -91,3 +91,85 @@ GPU is clearly better than CPU for VLM on this Jetson, but we now need to reduce
 - Interpretation:
   - Contract slimming is directionally correct and improves semantic latency on stable runs.
   - Biggest blocker for sub-second target remains GPU memory stability/fragmentation under mixed YOLO+VLM load.
+
+### 2026-04-16 — INT4 checkpoint compatibility smoke tests (3 attempts)
+
+#### Attempt 1: GPTQ INT4 (Qwen3.5-0.8B)
+- Candidate: `Vishva007/Qwen3.5-0.8B-W4A16-AutoRound-GPTQ`
+- Blocker: `auto-gptq` install failed due to Jetson package metadata mismatch (`0.7.1` vs `0.7.1+cu126`).
+- Model load fails before inference with `NameError: QuantizeConfig is not defined`.
+- Result: **FAIL** — backend dependency incompatible on this Jetson.
+
+#### Attempt 2: Bitsandbytes NF4 (Qwen3.5-0.8B)
+- Candidate: `techwithsergiu/Qwen3.5-0.8B-bnb-4bit`
+- Model loads on CUDA, but inference fails in `bitsandbytes` 4-bit matmul with `AssertionError: quant_state is not None`.
+- Even with allocator tuning and explicit `.cuda()` call, the 4-bit execution path cannot initialize.
+- Result: **FAIL** — 4-bit CUDA kernel issue on Jetson.
+
+#### Attempt 3: AWQ INT4 (Qwen3.5-0.8B)
+- Candidate: `Vishva007/Qwen3.5-0.8B-W4A16-AutoRound-AWQ`
+- `autoawq` installs, but model loading requires `gptqmodel` backend.
+- `gptqmodel` install fails on Jetson due to transitive dependency issue (`pypcre` resolution failure).
+- Result: **FAIL** — required backend cannot be installed.
+
+#### Conclusion
+- Tried 3 distinct 0.8B INT4 paths, each with a different backend blocker (GPTQ, bitsandbytes, AWQ).
+- Continued 0.8B INT4 backend wrangling has diminishing returns on this Jetson environment.
+- All failures are runtime/backend-related, not hardware-limited.
+
+### 2026-04-16 — Smaller-model fallback probe (SmolVLM-256M-Instruct)
+- Candidate tested: `HuggingFaceTB/SmolVLM-256M-Instruct`.
+- Downloaded locally to: `src/vlm-layer/SmolVLM-256M-Instruct`.
+- Smoke test:
+  - Loaded with `AutoProcessor` + `AutoModelForImageTextToText` on CUDA.
+  - Synthetic single-image prompt completed successfully on Jetson GPU.
+  - Load time: **~1.63 s**
+  - Single inference latency: **~4.54 s**
+- Output quality on first raw prompt:
+  - Model responded, but did not follow the exact target JSON schema cleanly on the first naive prompt.
+- Interpretation:
+  - This model is materially more promising for deployable Jetson use than the blocked 0.8B INT4 attempts.
+  - It is still above the long-term `~1 s` target, but much closer than current Qwen3.5 0.8B paths.
+
+### 2026-04-16 — Edge-optimized model probe (Gemma-4-E2B-IT) [TA recommendation]
+- Candidate: `google/gemma-4-e2b-it` (Google DeepMind).
+- Rationale: Gemma-4 Edge variants are specifically designed for Jetson Orin deployment with native multimodal support and bfloat16 dtype.
+- Model architecture: native `Gemma4ForConditionalGeneration` with audio + image + text support.
+- Initial attempt: tried full-precision download, which is ~5.0GB and takes very long on this network.
+- **Corrected approach**: switched to INT8 GGUF quantized version (`ggml-org/gemma-4-E2B-it-GGUF` repo, `gemma-4-E2B-it-Q8_0.gguf`), which is much smaller and inference-ready.
+- Status: INT8 GGUF version downloading in background; smoke test pending.
+
+### 2026-04-16 — PyTorch latency benchmark (SmolVLM-256M vs Qwen3.5-0.8B)
+
+#### SmolVLM-256M-Instruct
+- Load time: **7.78s**
+- Single-image inference: **6.3s per query**
+- Output quality: ✓ valid JSON responses
+- Result: **✓ STABLE AND WORKING**
+
+#### Qwen3.5-0.8B
+- Crashes during inference with Jetson NvMap allocator error (`CUDACachingAllocator.cpp:1131`)
+- Result: **✗ NOT DEPLOYABLE** on this Jetson configuration
+
+#### Summary
+- **Winner (PyTorch path): SmolVLM-256M-Instruct**
+  - Latency: ~6.3s per query (acceptable stepping stone; target is ~1s but this is 50% improvement over current 11.3s GPU Qwen)
+  - Stability: runs reliably on CUDA without allocator crashes
+  - Memory footprint: smaller than Qwen, compatible with concurrent YOLO TRT on GPU
+- **Gemma-4-E2B INT8** is still downloading but blocked for PyTorch (GGUF format requires llama.cpp, not transformers)
+
+### 2026-04-16 — TensorRT investigation for VLM
+
+#### Findings
+- Standard VLM models (SmolVLM, Qwen) do not have built-in ONNX export via `.export()`
+- TensorRT conversion requires ONNX → TRT pipeline
+- **Best practice:** NVIDIA's **TensorRT Edge-LLM** framework (specialized for VLM on Jetson)
+  - Requires building from source on Jetson
+  - Requires x86 host for initial quantization/export
+  - Payoff: 2-3x speedup vs PyTorch
+  - Complexity: High (not trivial setup)
+
+#### Recommendation
+- For immediate deployment: stick with **PyTorch SmolVLM-256M** (~6.3s latency)
+- For further optimization: if 6.3s is still too slow, investigate TensorRT Edge-LLM after establishing baseline
+- **Decision point:** is 6.3s acceptable, or proceed with TRT conversion?
