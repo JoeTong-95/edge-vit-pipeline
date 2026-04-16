@@ -1,206 +1,222 @@
-# Jetson Optimization - Final Report
-**Branch**: `jetson-optimization-A`  
-**Date**: 2026-04-16  
-**Target Device**: NVIDIA Jetson Orin Nano Engineering Reference Developer Kit Super (L4T R36.4.7, JetPack 6.x)
+# Jetson Optimization — Session Record
+**Branch**: `jetson-optimization-A` → merged into `jetson-dev`  
+**Device**: NVIDIA Jetson Orin Nano Super (L4T R36.4.7, JetPack 6.x)  
+**Sessions**: 2 (April 2026)
 
 ---
 
-## Executive Summary
+## Hardware Spec
 
-Extensive optimization work was conducted to prepare the edge-vit-pipeline stack for maximum efficiency on Jetson. While **Phase 1 (Docker environment fix) was successfully completed**, **Phase 2 (GPU inference)** encountered a **fundamental CUDA/NVML compatibility issue** between NGC 24.06 containers and the Jetson Orin Nano's GPU memory model.
+| Item | Value |
+|------|-------|
+| Device | Jetson Orin Nano Super Developer Kit |
+| GPU | NVIDIA Ampere SM 8.7, 1024 CUDA cores, 32 tensor cores |
+| GPU clock | 1020 MHz (MAXN_SUPER / 25W mode) |
+| Memory | 8 GB LPDDR5 unified (CPU + GPU share same pool) |
+| Memory bandwidth | 102 GB/s |
+| AI performance | 67 INT8 TOPS (Sparse) |
+| CUDA | 12.6 (L4T driver 540.4.0) |
+| TensorRT | 10.3.0 |
+| PyTorch | 2.8.0 (Jetson AI Lab wheel, CUDA 12.6) |
+| L4T | R36.4.7 |
+| Power mode | MAXN_SUPER (25W) — already at max |
 
-**Key Finding**: GPU inference in Docker on this Jetson configuration is currently **blocked by CUDA memory allocator crashes**, despite fixing the driver version mismatch that caused the initial OOM errors.
-
----
-
-## Work Completed
-
-### Phase 1: Docker & Environment ✅
-
-| Task | Status | Details |
-|------|--------|---------|
-| **Driver Fix** | ✅ Complete | Changed NGC base from 24.10 (needs driver 560+) to 24.06 (compatible with host 540.4.0) |
-| **Docker Launch Script** | ✅ Complete | Added `--ipc=host`, `--ulimit memlock=-1 stack`, auto `/dev/video*` passthrough (required by NVIDIA for PyTorch on Jetson) |
-| **Container Build** | ✅ Complete | Image rebuilt successfully (12.6 GB, including all deps: ultralytics 8.4.37, transformers 5.5.4) |
-| **CUDA Verification** | ✅ Works | PyTorch CUDA now available inside container (Orin GPU detected, 7619 MiB VRAM) |
-
-### Phase 2: Performance Tuning (Partial)
-
-| Task | Status | Progress |
-|------|--------|----------|
-| **cuDNN Auto-Tuning** | ✅ Implemented | Enabled `torch.backends.cudnn.benchmark=True` in benchmark.py (~10-20% conv speedup when YOLO can run) |
-| **VLM Batch Tuning** | ✅ Configured | Updated batch_wait_ms from 24→50ms in config.jetson.yaml for better Jetson async throughput |
-| **TensorRT Export** | ⚠️ Attempted | Blocked by NvMap allocator OOM during engine building (memory carveout too small for warmup tensors) |
-| **Jetson Config** | ✅ Created | `config.jetson.yaml` prepared with optimizations (awaiting working GPU inference) |
+**Quantization ceiling on SM 8.7**: FP16 → INT8 → INT4 (tensor cores).  
+FP8 requires SM 8.9+ (Ada Lovelace). FP4 requires SM 10.0+ (Blackwell).
 
 ---
 
-## Blockers & Root Causes
+## Session 1 — Docker / Environment (Blocked)
 
-### BLOCKER 1: CUDA Memory Allocator Bug (Phase 2 blocker)
+**Goal**: Get GPU inference running inside an NGC Docker container.
 
-**Error**: `RuntimeError: NVML_SUCCESS == r INTERNAL ASSERT FAILED at /opt/pytorch/pytorch/c10/cuda/CUDACachingAllocator.cpp`
+### What was tried
+1. NGC 24.10 container → blocked: host driver 540.4.0 requires driver 560+ for that image
+2. NGC 24.06 container → CUDA available, but `CUDACachingAllocator.cpp:1131` assert on every YOLO forward pass
+3. NGC 24.04 container → same allocator assert
 
-**When it happens**: During YOLO model warmup (first forward pass) after loading onto GPU
+### Root cause found
+Jetson uses **NvMap unified memory**. The PyTorch CUDA caching allocator assumes a discrete-GPU memory model and corrupts internal state when NvMap remaps pages under large allocations. This is a known incompatibility between stock PyTorch builds (even official NGC ones) and Jetson's memory subsystem.
 
-**Root Cause Analysis**:
-- Jetson Orin Nano uses **unified memory with NvMap carveout** for GPU buffers
-- NGC 24.06 container ships PyTorch 2.4.0a0 compiled with CUDA 12.6 derivatives
-- PyTorch's CUDA memory allocator has a bug when managing GPU memory on Jetson's unified memory + NvMap setup
-- The allocator incorrectly tracks memory state after allocating large tensors (≥300 MB, typical for YOLO model weights)
-- Even with `CUDA_LAUNCH_BLOCKING=1`, the allocator state machine fails
-
-**Attempted Workarounds**:
-- ✗ Docker ulimits (already applied in run script)
-- ✗ CUDA_LAUNCH_BLOCKING=1
-- ✗ Smaller batch sizes during TRT export
-- ✗ Different NGC base images in same driver family
-
-**Solution Paths** (not pursued in this session due to time):
-1. Run natively on Jetson (not in Docker) — would use different L4T libraries
-2. Downgrade to NGC 24.04 or earlier (older CUDA stack, may have different bugs)
-3. Use an x86 workstation for GPU inference, run classification only on Jetson
-
-### BLOCKER 2: VLM Load Disabled (Minor, phase 2 blocker)
-
-The VLM (Qwen3.5-0.8B) fails to load due to a **transformers version detection bug**:
-- Transformers library checks for `PyTorch >= 2.4` using string parsing
-- NGC container reports `PyTorch 2.4.0a0+f70bd71a48.nv24.6` (pre-release)
-- Transformers rejects this as not matching `>= 2.4` semantics
-- VLM is skipped in benchmark
-
-**Fix**: Would require updating transformers version check or using a different NGCbase.
+### Outcome
+Docker abandoned. Native (non-Docker) PyTorch is the correct path on Jetson because it ships the L4T-patched allocator.
 
 ---
 
-## What Was Accomplished (Despite Blockers)
+## Session 2 — Native Stack + GPU Inference + Optimization
 
-### Docker Stack Improvements
-- ✅ Driver-compatible base image (NGC 24.06)
-- ✅ NVIDIA-recommended Docker flags (ipc, ulimits)
-- ✅ Camera device passthrough
-- ✅ Container successfully builds and starts
+### Step 1: Native PyTorch
 
-### Code Optimizations Applied
-- ✅ `torch.backends.cudnn.benchmark=True` in benchmark.py
-- ✅ VLM batch wait tuning (50ms for Jetson async)
-- ✅ Config management system (env-var override for benchmarking)
-- ✅ All code changes committed to branch with clear documentation
+**Problem**: PyPI `torch 2.11.0+cu130` compiled for CUDA 13.0. Jetson driver only supports CUDA 12.6. `CUDA available: False`.
 
-### Repository State
-- ✅ Branch `jetson-optimization-A` cleanly organized
-- ✅ All scripts and configs versioned
-- ✅ TRT export script provided (for future use on non-Jetson)
-- ✅ Docker run script standardized
+**Fix**: Install `torch 2.8.0` from the Jetson AI Lab PyPI mirror (CUDA 12.6 wheel).
 
----
-
-## Benchmark Results
-
-### Baseline (NGC 24.10 + driver 540.4.0)
-- **Status**: BLOCKED at YOLO warmup with NvMap OOM (initial diagnostics)
-- **YOLO loaded**: ✗ No
-- **VLM loaded**: ✗ No
-- **FPS**: N/A
-
-### Optimized Attempt (NGC 24.06 + Phase 1+2 fixes)
-- **Status**: BLOCKED at YOLO warmup with CUDA allocator bug (different error than baseline)
-- **YOLO loaded**: Partial (model loads onto GPU, fails on first inference)
-- **VLM loaded**: ✗ No (version detection issue)
-- **FPS**: N/A
-
-**Interpretation**: The driver fix resolved the initial issue, but exposed a deeper incompatibility in the PyTorch/CUDA/Jetson stack.
-
----
-
-## Recommendations for Future Work
-
-### Short Term (Hours)
-1. **Try NGC 24.04** or earlier to see if older CUDA stack avoids the allocator bug
-2. **Run natively** (no Docker) on the Jetson to use the system PyTorch build (may not have the bug)
-3. **Disable GPU inference**, run YOLO on CPU (slow, but would verify VLM loading)
-
-### Medium Term (Days)
-1. **Export YOLO to TensorRT** on an x86 workstation (has more VRAM, different allocator)
-2. **Copy engines to Jetson**, use them for inference (avoids export OOM)
-3. **Profile VRAM usage** on Jetson native (non-Docker) to see actual memory headroom
-
-### Long Term (Weeks+)
-1. **Migrate to Jetson AGX Orin** (more RAM, different GPU) if available
-2. **Use quantization** (INT8 YOLO) to reduce VRAM footprint
-3. **Batch optimization** (VLM + tracking) to reduce GPU context switches
-
----
-
-## Files Modified (jetson-optimization-A)
-
-```
-docker/run-docker-jetson          # Added ipc, ulimits, device passthrough
-docker/export-yolo-trt.sh         # New: TRT export script (deferred due to OOM)
-benchmark.py                      # Added cuDNN benchmark + env-var config override
-src/configuration-layer/config.jetson.yaml  # New: Jetson-optimized config
+```bash
+bash docker/setup-native-jetson.sh
 ```
 
-### Commits
-1. `feat(jetson-opt-A): Phase 1 — fix Docker launch, add TRT export, add Jetson config`
-2. `fix(jetson-opt-A): dynamic TRT export + cudnn.benchmark for max performance`
-3. `fix(jetson-opt-A): TensorRT export OOM workaround + cudnn benchmark`
+### Step 2: VLM model files
+
+Git LFS pointers (133 bytes stubs) instead of real weights. Downloaded via `huggingface_hub`:
+- `tokenizer.json` (12 MB)
+- `model.safetensors-00001-of-00001.safetensors` (1.7 GB) from `Qwen/Qwen3.5-0.8B`
+
+### Step 3: NvMap unified memory workaround
+
+**Problem**: Even native PyTorch hit the NvMap assert during YOLO's first inference after the VLM model loaded.
+
+**Root cause**: Jetson's NvMap carve-out (~1.5 GB usable for GPU) is shared with CPU allocations. Loading the 1.7 GB VLM to CPU fills the carve-out, leaving no room for YOLO's ~80 MB of CUDA activations.
+
+**Fixes**:
+
+| Fix | Where | Effect |
+|-----|-------|--------|
+| `PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128` | `benchmark.py` (env var set at import) | Prevents single large NvMap blocks from blocking smaller allocations |
+| YOLO GPU warmup in `initialize_yolo_layer` | `src/yolo-layer/detector.py` | Forces YOLO to claim its ~80 MB CUDA allocation *before* VLM loads, reserving the NvMap space |
+| `config_vlm_device: cpu` | `config.jetson.yaml` | Keeps VLM off GPU entirely; VLM is async so CPU latency (~107 s/query) is acceptable |
+| VLM uses `bfloat16` | `src/vlm-layer/layer.py` | Model's native dtype; avoids float16 conversion on load that could trigger NvMap bugs |
+
+### Step 4: TensorRT FP16 engine
+
+Ultralytics' `.pt` YOLO runs through PyTorch eager inference. Exporting to a TRT engine eliminates PyTorch dispatch overhead and uses optimised FP16 CUDA kernels selected at build time.
+
+**Build process** (run once on Jetson, engine is device-specific):
+```bash
+# Export ONNX + build TRT FP16 engine (~12 min)
+PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128 python3 -c "
+import torch, numpy as np
+dummy = torch.zeros(1,3,640,640,dtype=torch.float16,device='cuda'); del dummy
+from ultralytics import YOLO
+m = YOLO('src/yolo-layer/models/yolov11v28_jingtao.pt')
+m.predict(np.zeros((640,640,3),dtype=np.uint8), device='cuda', half=True, verbose=False)
+m.export(format='engine', device='cuda', half=True, imgsz=640)
+"
+# Engine saved to: src/yolo-layer/models/yolov11v28_jingtao.engine
+```
+
+**Key NvMap trick**: pre-warm CUDA context with a dummy tensor *before* loading YOLO, then warmup YOLO (predict once) *before* export. TRT's calibration/build phase then runs within the already-claimed NvMap budget.
+
+**Note on TRT engine portability**: engine is compiled for SM 8.7, TRT 10.3, CUDA 12.6. Do NOT copy to x86 or other Jetson variants.
+
+### Step 5: INT8 investigation
+
+Built an INT8 engine at 384×640 (rectangular, matches 640×360 source with <6% letterbox waste vs 44% for square 640×640).
+
+**Result**: INT8 was **20% slower** than FP16 in the full pipeline (11.96 fps INT8 vs 14.95 fps FP16).
+
+**Why**: SM 8.7 at batch=1 is **memory-bandwidth bound**, not compute bound. INT8 halves arithmetic operations but the bandwidth cost of moving weight/activation tensors is nearly the same. FP16 tensor cores are faster here.
+
+INT8 becomes useful at batch ≥ 4 where compute starts to dominate. The INT8 build script and engine are kept as reference (`scripts/build_trt_int8.py`, `src/yolo-layer/models/yolov11v28_jingtao_int8.engine`).
+
+### Step 6: Eliminate double YOLO per frame
+
+**Problem found**: `benchmark.py` called `run_yolo_detection` twice per frame:
+1. A `dets_boot` call to feed `update_roi_state()` (ROI box collection)
+2. The main detection call for the downstream pipeline
+
+After ROI locks, `update_roi_state()` is a **no-op** (returns immediately on line 76 of `roi_layer.py`). The first call was entirely wasted. Before lock, both calls used the same full-frame input, so results were redundant anyway.
+
+**Fix**: single YOLO call per frame; pass those detections to both the pipeline and `update_roi_state()`.
+
+**Result**: 14.95 → **22.24 fps** (+49%).
 
 ---
 
-## Lessons Learned
+## Performance Progression
 
-1. **NGC containers + Jetson GPU inference = tricky**
-   - Driver version must match (we fixed 24.10→24.06)
-   - CUDA memory allocator can have Jetson-specific bugs
-   - Consider native L4T PyTorch as an alternative
+| State | YOLO backend | Pipeline FPS | YOLO ms/frame |
+|-------|-------------|-------------|---------------|
+| Baseline (PyTorch .pt FP32, Docker) | NGC 24.06 .pt | blocked | — |
+| Native PyTorch .pt FP16 | `yolov11v28_jingtao.pt` | 7.94 | 59.6 ms |
+| + TRT FP16 engine | `yolov11v28_jingtao.engine` | 14.95 | 28.6 ms |
+| + Single YOLO per frame | same engine | **22.24** | 36.6 ms |
+| INT8 384×640 (tested, reverted) | `yolov11v28_jingtao_int8.engine` | 11.96 | 33.0 ms |
 
-2. **Jetson memory model is constrained**
-   - Even with driver fix, allocator bugs emerge under GPU load
-   - NvMap carveout + unified memory = different stress patterns than desktop GPU
-   - TRT export/YOLO warmup both hit limits
-
-3. **Optimization work is blocked by infrastructure**
-   - The pipeline code itself (YOLO + VLM + tracking) is fine
-   - Can't measure perf improvements if GPU inference is blocked
-   - Need to resolve Docker/CUDA issue before proceeding
+YOLO capacity (engine alone, isolated) is ~35 fps — above the 30 fps source rate. Pipeline is below 30 fps due to remaining overhead (video decode ~7 ms, tracking ~1 ms, other layers).
 
 ---
 
-## Next Steps (For Next Session)
+## Benchmark Configs
 
-1. **Unblock GPU inference** (try NGC 24.04 or native Jetson PyTorch)
-2. **Run benchmark.py** to establish baseline FPS
-3. **Apply optimizations** (cuDNN is already in code, just needs working GPU path)
-4. **Measure gains** (cuDNN ~10-20%, VLM batching ~15-30%, TRT ~3-5×)
-5. **Document results** in final JETSON_OPTIMIZATION.md
+Three configs are available for performance evaluation:
 
----
+### 1. PyTorch .pt baseline (FP16, no TRT)
+```yaml
+# In config.jetson.yaml: change yolo model line to:
+config_yolo_model: yolov11v28_jingtao.pt
+# (remove config_yolo_imgsz override)
+```
+Run: `BENCH_CONFIG_YAML=src/configuration-layer/config.jetson.yaml python3 benchmark.py`
 
-## Appendix: Technical Details
+### 2. TRT FP16 (current default — best performance)
+```yaml
+config_yolo_model: yolov11v28_jingtao.engine
+config_yolo_imgsz:   # null = model default (640x640)
+```
+Run: `BENCH_CONFIG_YAML=src/configuration-layer/config.jetson.yaml python3 benchmark.py`
 
-### Hardware
-- **Device**: Jetson Orin Nano Engineering Reference Developer Kit Super
-- **L4T Release**: R36.4.7 (JetPack 6.x)
-- **Host Driver**: 540.4.0
-- **RAM**: 7.6 GB unified (CPU + GPU share same memory pool)
-- **GPU**: Orin (Compute Capability 8.7)
-- **Storage**: Slow SD card (typical Jetson)
-
-### Container Stack (NGC 24.06)
-- **Base**: `nvcr.io/nvidia/pytorch:24.06-py3-igpu`
-- **CUDA**: 12.x derived
-- **cuDNN**: Included
-- **TensorRT**: 10.3.0
-- **PyTorch**: 2.4.0a0+f70bd71a48
-- **Key Packages**: ultralytics 8.4.37, transformers 5.5.4, trt 10.3.0
-
-### Known NVIDIA Issues Related
-- Jetson unified memory + discrete GPU memory models can cause allocator confusion
-- NGC containers sometimes have edge-case bugs on Jetson due to different memory addressing
-- Pre-release PyTorch (2.4.0a0) versions have known CUDA bugs not in stable releases
+### 3. TRT INT8 384×640 (reference — do not use, slower than FP16 on this device)
+```yaml
+config_yolo_model: yolov11v28_jingtao_int8.engine
+config_yolo_imgsz:
+  - 384
+  - 640
+```
+Run: `BENCH_CONFIG_YAML=src/configuration-layer/config.jetson.yaml python3 benchmark.py`
 
 ---
 
-**Status**: Work paused pending infrastructure unblock (GPU inference on Jetson).  
-**Branch**: Ready for merge once GPU path is operational and benchmarks are collected.
+## Jetson-Specific Changes vs `main`
+
+### New files
+| File | Purpose |
+|------|---------|
+| `src/configuration-layer/config.jetson.yaml` | Jetson-tuned config (cuda device, TRT engine, VLM on CPU) |
+| `src/configuration-layer/config.cpu-test.yaml` | CPU-only config for verifying pipeline without GPU |
+| `docker/setup-native-jetson.sh` | Reproducible native torch install (Jetson AI Lab wheels) |
+| `scripts/build_trt_int8.py` | Standalone TRT INT8 builder using TRT Python API + torch GPU buffers |
+| `data/calib.yaml` | Calibration dataset YAML for INT8 build (300 frames from 4 videos) |
+
+### Modified files (Jetson-specific logic)
+| File | Change |
+|------|--------|
+| `benchmark.py` | `PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128`; reads `config_vlm_device` and `config_yolo_imgsz`; single YOLO call per frame |
+| `src/yolo-layer/detector.py` | CUDA FP16 inference; GPU warmup before VLM loads; `is_trt` flag skips dynamic ROI imgsz for TRT engines; `forced_imgsz` for non-square engines |
+| `src/vlm-layer/layer.py` | Uses `bfloat16` on CUDA (model native dtype); CPU fallback path |
+| `src/tracking-layer/tracker.py` | `build_tracking_layer_package` emits both nested and flat-array fields |
+| `src/configuration-layer/config*.py` | Added `config_vlm_device` and `config_yolo_imgsz` to schema, defaults, types, normalizer, validator |
+| `src/configuration-layer/config.yaml` | Added `config_vlm_device:` and `config_yolo_imgsz:` with null defaults |
+
+### Docker files (legacy, not used for native deployment)
+| File | Note |
+|------|------|
+| `docker/Dockerfile.jetson` | NGC-based image — do not use; NvMap incompatibility |
+| `docker/run-docker-jetson` | Kept for reference; was fixed with `--ipc=host` and ulimits |
+
+---
+
+## Architecture Decisions
+
+### VLM on CPU, YOLO on GPU
+The 1.7 GB VLM model fills Jetson's NvMap carve-out even when loaded to CPU. Running VLM on GPU would prevent YOLO from getting GPU memory. Since:
+- YOLO runs every frame (latency-critical)
+- VLM runs asynchronously in a worker thread (throughput over latency)
+
+VLM stays on CPU. Its ~107 s/query latency is acceptable because the async worker queues queries and doesn't block the frame loop.
+
+### TRT FP16 over INT8
+On SM 8.7 at batch=1, YOLO inference is memory-bandwidth bound. INT8 reduces arithmetic by 2× but bandwidth savings are minimal for small activation tensors. FP16 tensor cores are the practical ceiling. INT8 would help at batch ≥ 4.
+
+### Square 640×640 over rectangular 384×640
+The 640×640 TRT engine is faster than 384×640 INT8 in practice because:
+1. Ultralytics' letterbox path for square inputs is more optimised
+2. FP16 outweighs the pixel reduction benefit of rectangular inputs at this scale
+
+---
+
+## Known Limitations
+
+- VLM at 107 s/query on CPU is very slow. Future path: bitsandbytes INT8 or GPTQ quantization to fit VLM on GPU alongside YOLO (bitsandbytes is not yet on Jetson AI Lab mirror as of this session).
+- Pipeline at 22.24 fps is still below the 30 fps source rate. Remaining overhead is video decode (~7 ms/frame) and frame loop Python overhead.
+- TRT engines must be rebuilt if TRT version changes (TRT 10.3 engines are not forward-compatible).
+- The `model.safetensors` and `tokenizer.json` VLM files are not in the repo (too large for git). Run `docker/setup-native-jetson.sh` and download weights separately.
