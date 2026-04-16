@@ -1,4 +1,7 @@
-FROM nvcr.io/nvidia/pytorch:24.10-py3-igpu
+# NOTE: 24.10 images require newer driver stacks (560+). Jetson L4T R36.x
+# commonly ships with 540.x. Started with 24.06 but hit CUDA allocator bug.
+# Attempting 24.04 (older CUDA stack) to avoid PyTorch 2.4.0a0 GPU memory allocator issues.
+FROM nvcr.io/nvidia/pytorch:24.04-py3-igpu
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -19,6 +22,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.jetson.txt /tmp/requirements.txt
 
 RUN python3 -m pip install --upgrade pip setuptools wheel && \
-    python3 -m pip install -r /tmp/requirements.txt
+    python3 -m pip install -r /tmp/requirements.txt && \
+    # Jetson images should use the apt-provided OpenCV build.
+    # `ultralytics` pulls `opencv-python` wheels by default, which can conflict
+    # with Jetson's system OpenCV and fail at import-time (cv2 typing / dnn attrs).
+    python3 -m pip uninstall -y opencv-python opencv-python-headless || true
 
 CMD ["bash"]
