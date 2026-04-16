@@ -124,7 +124,10 @@ def initialize_vlm_layer(config: VLMConfig) -> VLMRuntimeState:
     _maybe_require_newer_transformers_for_checkpoint(model_path=model_path)
 
     runtime_device = _resolve_device(torch=torch, requested_device=config.config_device)
-    runtime_dtype = torch.float16 if runtime_device == "cuda" else torch.float32
+    # Use bfloat16 on CUDA — this is the model's native dtype and avoids a
+    # float16 conversion during weight loading that can trigger the Jetson
+    # NvMap / CUDACachingAllocator bug on unified-memory devices.
+    runtime_dtype = torch.bfloat16 if runtime_device == "cuda" else torch.float32
 
     try:
         processor = AutoProcessor.from_pretrained(

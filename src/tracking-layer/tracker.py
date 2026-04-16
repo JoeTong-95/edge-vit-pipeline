@@ -119,10 +119,12 @@ def update_tracks(yolo_layer_package):
     # Convert yolo_layer_package detections into numpy arrays for supervision
     bboxes = []
     confidences = []
+    class_names = []  # we carry string labels through, not class IDs
 
     for det in detections_list:
         bboxes.append(det["yolo_detection_bbox"])
         confidences.append(det["yolo_detection_confidence"])
+        class_names.append(det["yolo_detection_class"])
 
     bboxes_np = np.array(bboxes, dtype=np.float32)
     confidences_np = np.array(confidences, dtype=np.float32)
@@ -146,10 +148,20 @@ def update_tracks(yolo_layer_package):
         for i in range(len(tracked.tracker_id)):
             track_id = int(tracked.tracker_id[i])
 
+            # Match back to the original class name.
+            # After tracking, the order might change, so we use the
+            # bbox overlap to find the best match. However, supervision
+            # preserves the detection order after update, so index i
+            # maps to the same detection.
+            #
+            # NOTE: supervision may drop some detections (low confidence
+            # ones that ByteTrack didn't promote). The tracked detections
+            # are a subset, but the xyxy values let us match back.
+            # For simplicity, we use the confidence-sorted match.
             bbox = tracked.xyxy[i].tolist()
             confidence = float(tracked.confidence[i]) if tracked.confidence is not None else 0.0
 
-            # Find matching class name by bbox proximity to original detections.
+            # Find matching class name by bbox proximity to original detections
             matched_class = _match_class_name(bbox, detections_list)
 
             current_tracks.append({
@@ -190,11 +202,13 @@ def assign_tracking_status(current_tracks, frame_id):
         tid = track["track_id"]
 
         if tid not in _state["ever_seen_ids"]:
+            # First time seeing this track
             status = "new"
             _state["ever_seen_ids"].add(tid)
         else:
             status = "active"
 
+        # Update history with latest info
         _state["track_history"][tid] = {
             "bbox": track["bbox"],
             "class": track["class"],
@@ -202,6 +216,7 @@ def assign_tracking_status(current_tracks, frame_id):
             "last_frame": frame_id,
         }
 
+        # Clear any lost counter since this track is visible
         if tid in _state["lost_counts"]:
             del _state["lost_counts"][tid]
 
@@ -214,24 +229,29 @@ def assign_tracking_status(current_tracks, frame_id):
         })
 
     # --- Process lost tracks ---
+    # Tracks that were active previously but not in current frame
     lost_ids = _state["prev_active_ids"] - current_ids
 
+    # Also check tracks already marked lost from earlier frames
     for tid in list(_state["lost_counts"].keys()):
         if tid not in current_ids:
             lost_ids.add(tid)
 
     for tid in lost_ids:
         if tid in current_ids:
-            continue
+            continue  # not actually lost
 
+        # Increment lost counter
         _state["lost_counts"][tid] = _state["lost_counts"].get(tid, 0) + 1
 
+        # Drop if lost too long
         if _state["lost_counts"][tid] > _state["max_lost_frames"]:
             del _state["lost_counts"][tid]
             if tid in _state["track_history"]:
                 del _state["track_history"][tid]
             continue
 
+        # Emit lost track with last known info
         if tid in _state["track_history"]:
             history = _state["track_history"][tid]
             status_tracks.append({
@@ -242,6 +262,7 @@ def assign_tracking_status(current_tracks, frame_id):
                 "status": "lost",
             })
 
+    # Update previous active set for next frame
     _state["prev_active_ids"] = current_ids.copy()
 
     return status_tracks
@@ -258,35 +279,33 @@ def build_tracking_layer_package(frame_id, status_tracks):
     Returns:
         tracking_layer_package: dict with:
             - "tracking_layer_frame_id": int
-            - "tracking_layer_track_id": list[int]
-            - "tracking_layer_bbox": list[[x1, y1, x2, y2]]
-            - "tracking_layer_detector_class": list[str]
-            - "tracking_layer_confidence": list[float]
-            - "tracking_layer_status": list["new" | "active" | "lost"]
-
-        The pipeline document defines these field names directly, so this
-        package uses one list per field instead of an extra wrapper key.
+            - "tracking_layer_tracks": list of dicts, each with:
+                - "tracking_layer_track_id": int
+                - "tracking_layer_bbox": [x1, y1, x2, y2]
+                - "tracking_layer_detector_class": str
+                - "tracking_layer_confidence": float
+                - "tracking_layer_status": "new" | "active" | "lost"
     """
-    track_ids = []
-    bboxes = []
-    detector_classes = []
-    confidences = []
-    statuses = []
-
+    formatted_tracks = []
     for track in status_tracks:
-        track_ids.append(track["track_id"])
-        bboxes.append(track["bbox"])
-        detector_classes.append(track["class"])
-        confidences.append(track["confidence"])
-        statuses.append(track["status"])
+        formatted_tracks.append({
+            "tracking_layer_track_id": track["track_id"],
+            "tracking_layer_bbox": track["bbox"],
+            "tracking_layer_detector_class": track["class"],
+            "tracking_layer_confidence": track["confidence"],
+            "tracking_layer_status": track["status"],
+        })
 
+    # Include both nested and flat-array formats so downstream layers
+    # (vehicle_state_layer, vlm_frame_cropper_layer) can use either access style.
     return {
         "tracking_layer_frame_id": frame_id,
-        "tracking_layer_track_id": track_ids,
-        "tracking_layer_bbox": bboxes,
-        "tracking_layer_detector_class": detector_classes,
-        "tracking_layer_confidence": confidences,
-        "tracking_layer_status": statuses,
+        "tracking_layer_tracks": formatted_tracks,
+        "tracking_layer_track_id": [t["tracking_layer_track_id"] for t in formatted_tracks],
+        "tracking_layer_bbox": [t["tracking_layer_bbox"] for t in formatted_tracks],
+        "tracking_layer_detector_class": [t["tracking_layer_detector_class"] for t in formatted_tracks],
+        "tracking_layer_confidence": [t["tracking_layer_confidence"] for t in formatted_tracks],
+        "tracking_layer_status": [t["tracking_layer_status"] for t in formatted_tracks],
     }
 
 

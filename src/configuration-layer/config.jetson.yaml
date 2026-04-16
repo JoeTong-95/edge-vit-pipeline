@@ -1,0 +1,53 @@
+# config.jetson.yaml — Jetson-optimized pipeline configuration
+# Branch: jetson-optimization-A
+#
+# Note on YOLO backend:
+#   Using TensorRT FP16 engine at 640x640 (SM 8.7 optimal).
+#   INT8 was tested but measured ~20% SLOWER than FP16 in the full pipeline
+#   (11.96 fps INT8 vs 14.95 fps FP16). Root cause: SM 8.7 is memory-bandwidth
+#   bound at this model size — INT8 halves arithmetic but bandwidth savings are
+#   minimal for small activation tensors. FP16 tensor cores are faster here.
+#   FP8 is not supported on SM 8.7 (requires SM 8.9+/Ada).
+#   The INT8 engine + build script (scripts/build_trt_int8.py) are kept for
+#   reference and may be useful for larger batch sizes or bigger models.
+#   Engine was built natively on Jetson (TRT 10.3, CUDA 12.6, SM 8.7).
+#   Device-specific — do NOT copy to x86 or other Jetson variants.
+#
+# Key optimizations vs config.yaml:
+#   - YOLO: TensorRT FP16 engine (native Jetson build)
+#   - benchmark.py: torch.backends.cudnn.benchmark=True (auto-tuned conv kernels)
+#   - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128 (NvMap fragmentation fix)
+#   - config_vlm_worker_batch_wait_ms: 50ms (up from 24ms) for better Jetson throughput
+#   - VLM uses bfloat16 (model's native dtype, avoids conversion on load)
+
+config_device: cuda
+config_input_source: video
+config_input_path: data/upson1.mp4
+config_frame_resolution:
+  - 640
+  - 360
+config_roi_enabled: true
+config_roi_vehicle_count_threshold: 3
+config_yolo_model: yolov11v28_jingtao.engine
+config_yolo_confidence_threshold: 0.4
+config_yolo_imgsz:
+config_vlm_enabled: true
+config_vlm_model: src/vlm-layer/Qwen3.5-0.8B
+# VLM runs on CPU: Jetson NvMap carve-out (~1.5 GB) is fully consumed by the
+# VLM weights (1.7 GB), leaving no room for YOLO conv activations.
+# YOLO is latency-critical (every frame) so it keeps GPU.
+# VLM is async (background worker) so CPU latency is acceptable.
+config_vlm_device: cpu
+config_vlm_crop_feedback_enabled: false
+config_vlm_crop_cache_size: 12
+config_vlm_dead_after_lost_frames: 30
+config_vlm_runtime_mode: async
+config_vlm_worker_max_queue_size: 64
+config_vlm_worker_batch_size: 4
+config_vlm_worker_batch_wait_ms: 50
+config_vlm_worker_spill_queue_path: data/vlm_spill_queue.jsonl
+config_vlm_spill_max_file_mb: 512
+config_vlm_realtime_throttle_enabled: true
+config_scene_awareness_enabled: false
+config_metadata_output_enabled: true
+config_evaluation_output_enabled: false

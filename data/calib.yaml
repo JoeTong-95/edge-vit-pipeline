@@ -1,0 +1,23 @@
+# Calibration dataset for TRT INT8 engine build
+# Frames extracted from jingtao.mp4, upson1.mp4, sample1-4.mp4
+# Used only for INT8 activation range calibration — no labels needed
+
+path: /home/jetson/Desktop/edge-vit-pipeline/data
+train: calib_frames
+val: calib_frames
+
+nc: 13
+names:
+  0: class_0
+  1: pickup_truck
+  2: bus
+  3: van
+  4: tow_truck
+  5: semi_truck
+  6: box_truck
+  7: dump_truck
+  8: class_8
+  9: class_9
+  10: class_10
+  11: class_11
+  12: class_12

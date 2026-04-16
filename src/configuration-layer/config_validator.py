@@ -81,6 +81,12 @@ def validate_config_values(config: ConfigurationLayerConfig | Mapping[str, Any])
     if config_values["config_vlm_enabled"] and not config_values["config_vlm_model"]:
         raise ValueError("config_vlm_model is required when config_vlm_enabled is true.")
 
+    vlm_device_override = str(config_values.get("config_vlm_device") or "").strip()
+    if vlm_device_override and vlm_device_override not in CONFIG_ALLOWED_DEVICES:
+        raise ValueError(
+            f"config_vlm_device must be one of {sorted(CONFIG_ALLOWED_DEVICES)} or empty."
+        )
+
     if not isinstance(config_values["config_vlm_crop_feedback_enabled"], bool):
         raise ValueError("config_vlm_crop_feedback_enabled must be a bool.")
 
