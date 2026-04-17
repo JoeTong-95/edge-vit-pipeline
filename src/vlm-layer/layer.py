@@ -46,6 +46,8 @@ class VLMConfig:
     # ""    → explicitly disabled even if the engine file is present.
     # <str> → use this exact path.
     config_vlm_trt_vision_engine: str | None = None
+    # Greedy decode cap (lower = faster worst-case; too low may truncate JSON).
+    config_vlm_max_new_tokens: int = 32
 
 
 @dataclass(slots=True)
@@ -90,11 +92,37 @@ class VLMRuntimeState:
     vlm_runtime_device: str
     vlm_runtime_dtype: str
     vlm_runtime_model_id: str
+    vlm_runtime_max_new_tokens: int = 32
     vlm_runtime_processor: Any = None
     vlm_runtime_model: Any = None
     vlm_runtime_torch: Any = None
     # Non-None when TRT vision encoder acceleration is active.
     vlm_runtime_trt_context: Any = None
+
+
+def _from_pretrained_vlm(
+    *,
+    model_class: Any,
+    model_path: Path,
+    runtime_dtype: Any,
+    runtime_device: str,
+) -> Any:
+    """Load weights; on CUDA prefer SDPA attention (faster than eager when supported)."""
+    base_kw: dict[str, Any] = {
+        "torch_dtype": runtime_dtype,
+        "trust_remote_code": True,
+        "local_files_only": True,
+    }
+    if runtime_device == "cuda":
+        try:
+            return model_class.from_pretrained(
+                model_path,
+                attn_implementation="sdpa",
+                **base_kw,
+            )
+        except (TypeError, ValueError, RuntimeError, OSError):
+            pass
+    return model_class.from_pretrained(model_path, **base_kw)
 
 
 def initialize_vlm_layer(config: VLMConfig) -> VLMRuntimeState:
@@ -107,6 +135,7 @@ def initialize_vlm_layer(config: VLMConfig) -> VLMRuntimeState:
             vlm_runtime_device="disabled",
             vlm_runtime_dtype="disabled",
             vlm_runtime_model_id=Path(config.config_vlm_model).name or "disabled",
+            vlm_runtime_max_new_tokens=max(8, min(256, int(config.config_vlm_max_new_tokens))),
         )
 
     try:
@@ -135,6 +164,7 @@ def initialize_vlm_layer(config: VLMConfig) -> VLMRuntimeState:
     # float16 conversion during weight loading that can trigger the Jetson
     # NvMap / CUDACachingAllocator bug on unified-memory devices.
     runtime_dtype = torch.bfloat16 if runtime_device == "cuda" else torch.float32
+    max_new_tokens = max(8, min(256, int(config.config_vlm_max_new_tokens)))
 
     try:
         processor = AutoProcessor.from_pretrained(
@@ -144,11 +174,11 @@ def initialize_vlm_layer(config: VLMConfig) -> VLMRuntimeState:
         )
         _set_decoder_only_processor_left_padding(processor)
         model_class = _load_model_class(transformers)
-        model = model_class.from_pretrained(
-            model_path,
-            torch_dtype=runtime_dtype,
-            trust_remote_code=True,
-            local_files_only=True,
+        model = _from_pretrained_vlm(
+            model_class=model_class,
+            model_path=model_path,
+            runtime_dtype=runtime_dtype,
+            runtime_device=runtime_device,
         )
     except (KeyError, ValueError) as exc:
         _raise_if_unsupported_qwen35_model_type(exc)
@@ -171,6 +201,7 @@ def initialize_vlm_layer(config: VLMConfig) -> VLMRuntimeState:
         vlm_runtime_device=runtime_device,
         vlm_runtime_dtype=str(runtime_dtype),
         vlm_runtime_model_id=model_path.name,
+        vlm_runtime_max_new_tokens=max_new_tokens,
         vlm_runtime_processor=processor,
         vlm_runtime_trt_context=trt_context,
         vlm_runtime_model=model,
@@ -374,10 +405,12 @@ def infer_vlm_semantics(
         device=vlm_runtime_state.vlm_runtime_device,
     )
 
+    _mt = int(getattr(vlm_runtime_state, "vlm_runtime_max_new_tokens", 32))
+    _mt = max(8, min(256, _mt))
     with vlm_runtime_state.vlm_runtime_torch.inference_mode():
         generated_ids = vlm_runtime_state.vlm_runtime_model.generate(
             **inputs,
-            max_new_tokens=32,
+            max_new_tokens=_mt,
             do_sample=False,
         )
 
@@ -430,10 +463,12 @@ def infer_vlm_semantics_batch(
         device=vlm_runtime_state.vlm_runtime_device,
     )
 
+    _mt = int(getattr(vlm_runtime_state, "vlm_runtime_max_new_tokens", 32))
+    _mt = max(8, min(256, _mt))
     with vlm_runtime_state.vlm_runtime_torch.inference_mode():
         generated_ids = vlm_runtime_state.vlm_runtime_model.generate(
             **inputs,
-            max_new_tokens=32,
+            max_new_tokens=_mt,
             do_sample=False,
         )
 
