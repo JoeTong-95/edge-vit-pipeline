@@ -42,9 +42,26 @@ BENCH_CONFIG_YAML=src/configuration-layer/config.jetson.vlm-smolvlm-256m.yaml \
   python3 benchmark.py
 ```
 
-**Option 2: Real-time pipeline (JSONL output)**:
+**Option 2: Real-time pipeline with video file** (JSONL output):
 ```bash
 python3 initialize_pipeline.py --output data/pipeline_output.jsonl
+```
+
+**Option 3: Live camera test** (real-time display with YOLO + tracking):
+```bash
+# Must have a camera connected to Jetson
+python3 src/input-layer/live_camera_pipeline_test.py
+
+# Or with options:
+python3 src/input-layer/live_camera_pipeline_test.py \
+  --device 0 \
+  --width 1280 --height 720 \
+  --conf 0.4 \
+  --device-compute cuda
+
+# Controls while running:
+#   q = quit
+#   s = save screenshot
 ```
 
 ---
@@ -164,6 +181,33 @@ python3 src/configuration-layer/test/test_config_node.py
 
 # Dependencies check
 python3 check_dependencies.py
+
+# Camera + YOLO + tracking integration test (live display)
+python3 src/input-layer/live_camera_pipeline_test.py
+```
+
+### Camera Hardware Setup (Before Live Test)
+
+**For Jetson with CSI camera** (e.g., RPi Camera Module 3):
+```bash
+# Live camera test auto-uses GStreamer
+python3 src/input-layer/live_camera_pipeline_test.py --use-gstreamer
+
+# Expected: Display window showing live camera feed with YOLO detections + tracking IDs
+```
+
+**For USB camera**:
+```bash
+# Detect camera device
+ls /dev/video*
+
+# Test with device index (e.g., /dev/video0)
+python3 src/input-layer/live_camera_pipeline_test.py --device 0
+```
+
+**No camera?** Skip to benchmark with video file:
+```bash
+BENCH_CONFIG_YAML=src/configuration-layer/config.jetson.vlm-smolvlm-256m.yaml python3 benchmark.py
 ```
 
 ### Full Benchmark (60 s)

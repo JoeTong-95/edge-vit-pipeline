@@ -128,7 +128,11 @@ cd /home/jetson/Desktop/edge-vit-pipeline
 python3 check_dependencies.py
 # Expected: [python] OK, [imports] OK, [data] OK, [vlm] OK
 
-# 2. Run short config test
+# 2. Camera + YOLO + Tracking integration test (if camera available)
+python3 src/input-layer/live_camera_pipeline_test.py
+# Expected: Live display window with YOLO detections, tracking IDs, no crashes
+
+# 3. Run short config test
 BENCH_CONFIG_YAML=src/configuration-layer/config.jetson.vlm-smolvlm-256m.yaml \
   timeout 30 python3 benchmark.py 2>&1 | tail -20
 # Expected: No crashes, VLM latency ~4-5 s
