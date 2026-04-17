@@ -25,10 +25,10 @@ import time
 # CONFIG — edit these values before running
 # ══════════════════════════════════════════════════════════════════════════════
 
-INPUT_SOURCE = "video"          # "video" or "camera"
-VIDEO_PATH   = "data/sample1.mp4"  # path to video file (used when INPUT_SOURCE = "video")
-RESOLUTION   = (640, 480)       # (width, height) in pixels
-CAMERA_DEVICE = 0               # device index (used when INPUT_SOURCE = "camera")
+INPUT_SOURCE  = "camera"        # "camera" or "video"
+CAMERA_DEVICE = 0               # device index — /dev/video0 = 0, /dev/video1 = 1, …
+RESOLUTION    = (640, 480)      # (width, height) in pixels
+VIDEO_PATH    = "data/sample1.mp4"  # only used when INPUT_SOURCE = "video"
 
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -103,6 +103,7 @@ def run_tests(source: str, path: str, resolution: tuple) -> None:
             config_input_source=source,
             config_frame_resolution=resolution,
             config_input_path=path,
+            camera_device_index=CAMERA_DEVICE,
         )
         assert layer.is_initialized, "Layer reports not initialized"
         _pass(f"Initialized with source='{source}'.")
