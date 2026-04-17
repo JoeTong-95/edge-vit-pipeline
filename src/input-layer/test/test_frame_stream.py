@@ -156,12 +156,20 @@ def run_tests(source: str, path: str, resolution: tuple) -> None:
     # Test 5: Stream N frames and print indices
     # ------------------------------------------------------------------
     import cv2
+    import os
 
     n_stream = 10
     preview_label = "test_frame_stream — press Q to stop"
+
+    # Preview requires a local display — not available over SSH
+    preview_active = SHOW_PREVIEW and bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
     print(f"\n[Test 5] Stream {n_stream} more frames (print frame index)")
-    if SHOW_PREVIEW:
+    if SHOW_PREVIEW and not preview_active:
+        _info("No display detected (SSH session?) — preview disabled.")
+    elif preview_active:
         _info("Preview window open — press Q to quit early.")
+
     stream_ok = True
     for i in range(n_stream):
         raw = layer.read_next_frame()
@@ -172,7 +180,7 @@ def run_tests(source: str, path: str, resolution: tuple) -> None:
         print(f"    frame_id={pkg.input_layer_frame_id}  "
               f"resolution={pkg.input_layer_resolution}  "
               f"timestamp={pkg.input_layer_timestamp:.3f}")
-        if SHOW_PREVIEW:
+        if preview_active:
             cv2.imshow(preview_label, pkg.input_layer_image)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 _info("Preview closed by user.")
@@ -182,7 +190,7 @@ def run_tests(source: str, path: str, resolution: tuple) -> None:
             stream_ok = False
             failed += 1
             break
-    if SHOW_PREVIEW:
+    if preview_active:
         cv2.destroyAllWindows()
     if stream_ok:
         _pass("Frame indices are monotonically increasing.")
