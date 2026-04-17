@@ -6,30 +6,54 @@ Quick end-to-end pipeline smoke test using a live camera or video file.
 Confirms that every stage produces valid output without requiring a GUI.
 
 Tested stages (in order):
-    [1] Input layer  — reads frames from camera or video file
-    [2] ROI layer    — initializes and builds ROI package
-    [3] YOLO layer   — detects vehicles in the frame
-    [4] Tracking layer — tracks detections across frames
-    [5] VLM crop + cache — crops tracked vehicles and updates the cache
-    [6] VLM inference — runs SmolVLM on the first available crop
+    [1] Input layer       — reads frames from camera or video file
+    [2] ROI layer         — initializes and builds ROI package
+    [3] YOLO layer        — detects vehicles in the frame
+    [4] Tracking layer    — tracks detections across frames
+    [5] VLM crop + cache  — crops tracked vehicles and updates the cache
+    [6] VLM inference     — runs SmolVLM on the first available crop
 
 Usage:
-    python test_video_pipeline.py                  # use video file (data/)
-    python test_video_pipeline.py --live           # use live camera device 0
-    python test_video_pipeline.py --live --device 1
-    python test_video_pipeline.py --frames 60      # run 60 frames instead of default
-    python test_video_pipeline.py --no-vlm         # skip VLM (faster smoke test)
+    python test_video_pipeline.py
+
+Edit the CONFIG section below to change source, model, and test options.
 
 Exit codes:
     0  all tested stages passed
     1  one or more stages failed
 """
 
-import argparse
 import sys
 import time
 from pathlib import Path
 from typing import Any
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CONFIG — edit these values before running
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Input source: "camera" for live feed, "video" for a file
+INPUT_SOURCE    = "video"
+
+# Video file path — used when INPUT_SOURCE = "video"
+# Leave as "" to auto-pick the first .mp4 found in data/
+VIDEO_PATH      = ""
+
+# Camera settings — used when INPUT_SOURCE = "camera"
+CAMERA_DEVICE   = 0       # /dev/video0 = 0, /dev/video1 = 1, …
+USE_GSTREAMER   = False   # True for Jetson CSI cameras
+
+# How many frames to run through the pipeline
+TEST_FRAMES     = 30
+
+# Set to True to skip VLM inference (faster smoke test — stages 1–5 only)
+SKIP_VLM        = False
+
+# Models
+YOLO_MODEL      = "yolov11v28_jingtao.engine"
+VLM_MODEL       = "src/vlm-layer/SmolVLM-256M-Instruct"
+
+# ══════════════════════════════════════════════════════════════════════════════
 
 # ── sys.path setup ────────────────────────────────────────────────────────────
 _ROOT = Path(__file__).resolve().parent
@@ -110,37 +134,16 @@ def _default_video() -> str:
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Smoke-test the full pipeline end-to-end (no GUI)"
-    )
-    source = parser.add_mutually_exclusive_group()
-    source.add_argument("--live", action="store_true",
-                        help="Use live camera instead of a video file")
-    source.add_argument("--video", default="",
-                        help="Path to a video file (default: first .mp4 in data/)")
-    parser.add_argument("--device", type=int, default=0,
-                        help="Camera device index for --live (default: 0)")
-    parser.add_argument("--use-gstreamer", action="store_true",
-                        help="Use GStreamer for Jetson CSI camera")
-    parser.add_argument("--frames", type=int, default=30,
-                        help="Number of frames to process (default: 30)")
-    parser.add_argument("--no-vlm", action="store_true",
-                        help="Skip VLM inference (faster smoke test)")
-    parser.add_argument("--yolo-model", default="yolov11v28_jingtao.engine",
-                        help="YOLO model name (default: yolov11v28_jingtao.engine)")
-    parser.add_argument("--vlm-model", default="src/vlm-layer/SmolVLM-256M-Instruct",
-                        help="Path to VLM model directory")
-    args = parser.parse_args()
-
-    video_path = args.video or (_default_video() if not args.live else "")
+    use_live  = INPUT_SOURCE == "camera"
+    video_path = VIDEO_PATH or (_default_video() if not use_live else "")
 
     print()
     print("═" * 60)
     print("  EDGE-VIT PIPELINE — END-TO-END SMOKE TEST")
     print("═" * 60)
-    print(f"  Source  : {'live camera (device=' + str(args.device) + ')' if args.live else video_path}")
-    print(f"  Frames  : {args.frames}")
-    print(f"  VLM     : {'disabled (--no-vlm)' if args.no_vlm else args.vlm_model}")
+    print(f"  Source  : {'live camera (device=' + str(CAMERA_DEVICE) + ')' if use_live else video_path}")
+    print(f"  Frames  : {TEST_FRAMES}")
+    print(f"  VLM     : {'disabled (SKIP_VLM=True)' if SKIP_VLM else VLM_MODEL}")
     print()
 
     # ── [1] Input Layer ───────────────────────────────────────────
@@ -148,22 +151,22 @@ def main() -> int:
     try:
         from input_layer import InputLayer
         input_layer = InputLayer()
-        if args.live:
+        if use_live:
             input_layer.initialize_input_layer(
                 config_input_source="camera",
                 config_frame_resolution=(640, 360),
-                camera_device_index=args.device,
-                use_gstreamer=args.use_gstreamer,
+                camera_device_index=CAMERA_DEVICE,
+                use_gstreamer=USE_GSTREAMER,
             )
         else:
             if not video_path:
-                raise FileNotFoundError("No video file found in data/ — use --live or --video <path>")
+                raise FileNotFoundError("No video file found in data/ — set VIDEO_PATH or INPUT_SOURCE = 'camera'")
             input_layer.initialize_input_layer(
                 config_input_source="video",
                 config_frame_resolution=(640, 360),
                 config_input_path=video_path,
             )
-        _pass("1. Input Layer", "video" if not args.live else "camera")
+        _pass("1. Input Layer", "camera" if use_live else "video")
     except Exception as exc:
         _fail("1. Input Layer", exc)
         return _summary()  # cannot continue without frames
@@ -183,11 +186,11 @@ def main() -> int:
     try:
         from detector import initialize_yolo_layer, run_yolo_detection, filter_yolo_detections, build_yolo_layer_package
         initialize_yolo_layer(
-            model_name=args.yolo_model,
+            model_name=YOLO_MODEL,
             conf_threshold=0.4,
             device="cuda",
         )
-        _pass("3. YOLO Layer", f"model={args.yolo_model}")
+        _pass("3. YOLO Layer", f"model={YOLO_MODEL}")
     except Exception as exc:
         _fail("3. YOLO Layer", exc)
         return _summary()
@@ -224,26 +227,26 @@ def main() -> int:
 
     # ── [6] VLM ───────────────────────────────────────────────────
     vlm_state = None
-    if not args.no_vlm:
+    if not SKIP_VLM:
         _stage("6. VLM Inference")
         try:
             from layer import VLMConfig, initialize_vlm_layer
             vlm_cfg = VLMConfig(
                 config_vlm_enabled=True,
-                config_vlm_model=args.vlm_model,
+                config_vlm_model=VLM_MODEL,
                 config_device="cuda",
                 config_vlm_max_new_tokens=24,
             )
             vlm_state = initialize_vlm_layer(vlm_cfg)
-            _pass("6. VLM Inference", f"model={Path(args.vlm_model).name} device={vlm_state.vlm_runtime_device}")
+            _pass("6. VLM Inference", f"model={Path(VLM_MODEL).name} device={vlm_state.vlm_runtime_device}")
         except Exception as exc:
             _fail("6. VLM Inference", exc)
     else:
-        _skip("6. VLM Inference", "--no-vlm flag set")
+        _skip("6. VLM Inference", "SKIP_VLM = True")
 
     # ── Frame loop ────────────────────────────────────────────────
     print()
-    print(f"  Processing {args.frames} frames …")
+    print(f"  Processing {TEST_FRAMES} frames …")
     print()
 
     frame_detections: list[int] = []
@@ -252,7 +255,7 @@ def main() -> int:
     vlm_result_text = ""
     t0 = time.monotonic()
 
-    for frame_idx in range(args.frames):
+    for frame_idx in range(TEST_FRAMES):
         raw = input_layer.read_next_frame()
         if raw is None:
             print(f"  ⚠  Frame {frame_idx}: no data (end of source?)")
@@ -339,7 +342,7 @@ def main() -> int:
                 break
 
         # Progress every 10 frames
-        if frame_idx % 10 == 9 or frame_idx == args.frames - 1:
+        if frame_idx % 10 == 9 or frame_idx == TEST_FRAMES - 1:
             elapsed = time.monotonic() - t0
             fps = (frame_idx + 1) / max(elapsed, 0.001)
             print(f"  frame {frame_idx+1:3d}/{args.frames}  "
