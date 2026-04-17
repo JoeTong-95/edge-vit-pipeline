@@ -76,6 +76,7 @@ def normalize_config(raw_config: dict[str, Any]) -> ConfigurationLayerConfig:
             merged["config_vlm_realtime_throttle_enabled"],
             "config_vlm_realtime_throttle_enabled",
         ),
+        config_vlm_max_new_tokens=int(merged["config_vlm_max_new_tokens"]),
         config_scene_awareness_enabled=_normalize_bool(
             merged["config_scene_awareness_enabled"],
             "config_scene_awareness_enabled",

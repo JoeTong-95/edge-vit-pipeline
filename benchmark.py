@@ -326,6 +326,7 @@ def main() -> None:
     vlm_worker_batch_wait_ms = int(get_config_value(cfg, "config_vlm_worker_batch_wait_ms"))
     vlm_worker_max_queue_size = int(get_config_value(cfg, "config_vlm_worker_max_queue_size"))
     vlm_runtime_mode_cfg = str(get_config_value(cfg, "config_vlm_runtime_mode"))
+    vlm_max_new_tokens = int(get_config_value(cfg, "config_vlm_max_new_tokens"))
     vlm_bench_batch_size = int(get_config_value(cfg, "config_vlm_worker_batch_size"))
     if BENCH_OVERRIDE_VLM_BATCH_SIZE is not None:
         vlm_bench_batch_size = int(BENCH_OVERRIDE_VLM_BATCH_SIZE)
@@ -373,6 +374,7 @@ def main() -> None:
     _p("vlm_model", _resolve_repo_path(vlm_model) if vlm_model else "none")
     if vlm_enabled:
         _p("vlm_device", vlm_device)
+        _p("vlm_max_new_tokens", str(int(vlm_max_new_tokens)))
         _p("vlm_benchmark_batch_size", str(int(vlm_bench_batch_size)))
         _p("vlm_benchmark_runtime_mode_intent", vlm_runtime_mode_intent)
     if use_time_budget:
@@ -432,6 +434,7 @@ def main() -> None:
                     config_vlm_enabled=True,
                     config_vlm_model=_resolve_repo_path(vlm_model),
                     config_device=vlm_device,
+                    config_vlm_max_new_tokens=int(vlm_max_new_tokens),
                 )
             )
             vlm_runtime_device = str(getattr(vlm_state, "vlm_runtime_device", "unknown"))

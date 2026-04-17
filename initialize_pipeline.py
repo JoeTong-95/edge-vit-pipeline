@@ -157,6 +157,9 @@ def main() -> None:
 
     vlm_enabled = bool(get_config_value(cfg, "config_vlm_enabled"))
     vlm_model = str(get_config_value(cfg, "config_vlm_model"))
+    _vlm_dev = str(get_config_value(cfg, "config_vlm_device") or "").strip()
+    vlm_infer_device = _vlm_dev if _vlm_dev else device
+    vlm_max_new_tokens = int(get_config_value(cfg, "config_vlm_max_new_tokens"))
     vlm_crop_cache_size = int(get_config_value(cfg, "config_vlm_crop_cache_size"))
     vlm_dead_after_lost_frames = int(get_config_value(cfg, "config_vlm_dead_after_lost_frames"))
     vlm_worker_batch_wait_ms = int(get_config_value(cfg, "config_vlm_worker_batch_wait_ms"))
@@ -225,7 +228,8 @@ def main() -> None:
                 VLMConfig(
                     config_vlm_enabled=True,
                     config_vlm_model=_resolve_repo_path(vlm_model),
-                    config_device=device,
+                    config_device=vlm_infer_device,
+                    config_vlm_max_new_tokens=int(vlm_max_new_tokens),
                 )
             )
             crop_cache = initialize_vlm_crop_cache(

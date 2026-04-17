@@ -23,6 +23,7 @@ DEFAULT_CONFIG_VALUES = {
     "config_vlm_worker_spill_queue_path": "",
     "config_vlm_spill_max_file_mb": 256.0,
     "config_vlm_realtime_throttle_enabled": True,
+    "config_vlm_max_new_tokens": 32,
     "config_scene_awareness_enabled": False,
     "config_metadata_output_enabled": True,
     "config_evaluation_output_enabled": False,

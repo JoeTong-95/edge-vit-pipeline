@@ -23,6 +23,7 @@ CONFIG_ALLOWED_KEYS = {
     "config_vlm_worker_spill_queue_path",
     "config_vlm_spill_max_file_mb",
     "config_vlm_realtime_throttle_enabled",
+    "config_vlm_max_new_tokens",
     "config_scene_awareness_enabled",
     "config_metadata_output_enabled",
     "config_evaluation_output_enabled",

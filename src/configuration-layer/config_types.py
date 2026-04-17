@@ -28,6 +28,7 @@ class ConfigurationLayerConfig:
     config_vlm_worker_spill_queue_path: str
     config_vlm_spill_max_file_mb: float
     config_vlm_realtime_throttle_enabled: bool
+    config_vlm_max_new_tokens: int
     config_scene_awareness_enabled: bool
     config_metadata_output_enabled: bool
     config_evaluation_output_enabled: bool

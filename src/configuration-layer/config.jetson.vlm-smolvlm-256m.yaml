@@ -12,6 +12,7 @@ config_yolo_imgsz: # null = model default (640x640)
 config_vlm_enabled: true
 config_vlm_model: src/vlm-layer/SmolVLM-256M-Instruct
 config_vlm_device: cuda
+config_vlm_max_new_tokens: 24  # shorter JSON decode than 32 → lower worst-case latency
 config_vlm_crop_cache_size: 16
 config_vlm_worker_enabled: true
 config_vlm_worker_batch_size: 1  # 1 = minimal peak activation memory; 4 overflows NvMap with YOLO TRT loaded

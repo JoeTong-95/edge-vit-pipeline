@@ -114,6 +114,10 @@ def validate_config_values(config: ConfigurationLayerConfig | Mapping[str, Any])
     if not isinstance(config_values["config_vlm_realtime_throttle_enabled"], bool):
         raise ValueError("config_vlm_realtime_throttle_enabled must be a bool.")
 
+    vlm_max_new = int(config_values["config_vlm_max_new_tokens"])
+    if vlm_max_new < 8 or vlm_max_new > 256:
+        raise ValueError("config_vlm_max_new_tokens must be between 8 and 256 (inclusive).")
+
     spill_path = str(config_values["config_vlm_worker_spill_queue_path"] or "").strip()
     if vlm_mode == "spill" and not spill_path:
         raise ValueError(
