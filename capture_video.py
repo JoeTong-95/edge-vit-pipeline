@@ -6,8 +6,8 @@ Capture live camera footage and save to the data/ folder.
 
 Usage:
     python capture_video.py
-    python capture_video.py --device 0 --width 1280 --height 720 --fps 30
-    python capture_video.py --use-gstreamer   # Jetson CSI camera
+
+Edit the CONFIG section below to change camera settings.
 
 Steps:
     1. Opens the camera and probes actual frame size/FPS.
@@ -17,8 +17,6 @@ Steps:
     5. Prints a summary when done.
 """
 
-import argparse
-import os
 import shutil
 import sys
 import time
@@ -33,12 +31,21 @@ sys.path.insert(0, str(_ROOT / "src" / "input-layer"))
 
 from input_layer import InputLayer  # noqa: E402
 
-# ── constants ─────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# CONFIG — edit these values before running
+# ══════════════════════════════════════════════════════════════════════════════
+
+CAMERA_DEVICE   = 0       # Camera device index (/dev/video0 = 0, /dev/video1 = 1, …)
+CAPTURE_WIDTH   = 1280    # Requested capture width  (pixels)
+CAPTURE_HEIGHT  = 720     # Requested capture height (pixels)
+CAPTURE_FPS     = 30      # Requested frames per second
+USE_GSTREAMER   = False   # True for Jetson CSI cameras; False for USB/V4L2
+
+# ══════════════════════════════════════════════════════════════════════════════
+
 DATA_DIR = _ROOT / "data"
-# Reserve this much disk so the OS stays healthy
-RESERVED_DISK_BYTES = 512 * 1024 * 1024  # 512 MB
-# Safety factor: assume encoded video is ~80 % of raw size
-ENCODE_RATIO = 0.80
+RESERVED_DISK_BYTES = 512 * 1024 * 1024  # 512 MB kept free for OS
+ENCODE_RATIO = 0.80                       # assume encoded file ≈ 80 % of raw
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -132,26 +139,17 @@ def _probe_camera(
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Capture live camera footage and save to data/"
-    )
-    parser.add_argument("--device", type=int, default=0, help="Camera device index (default: 0)")
-    parser.add_argument("--width", type=int, default=1280, help="Capture width (default: 1280)")
-    parser.add_argument("--height", type=int, default=720, help="Capture height (default: 720)")
-    parser.add_argument("--fps", type=int, default=30, help="Target FPS (default: 30)")
-    parser.add_argument("--use-gstreamer", action="store_true",
-                        help="Use GStreamer pipeline for Jetson CSI camera")
-    args = parser.parse_args()
-
     print()
     print("═" * 60)
     print("  EDGE-VIT PIPELINE — VIDEO CAPTURE")
     print("═" * 60)
+    print(f"  device={CAMERA_DEVICE}  {CAPTURE_WIDTH}×{CAPTURE_HEIGHT}  "
+          f"{CAPTURE_FPS}fps  gstreamer={USE_GSTREAMER}")
 
     # ── probe camera ──────────────────────────────────────────────
-    print(f"\n[1/4] Probing camera (device={args.device}) …")
+    print(f"\n[1/4] Probing camera (device={CAMERA_DEVICE}) …")
     actual_w, actual_h, actual_fps = _probe_camera(
-        args.device, args.use_gstreamer, args.width, args.height, args.fps
+        CAMERA_DEVICE, USE_GSTREAMER, CAPTURE_WIDTH, CAPTURE_HEIGHT, CAPTURE_FPS
     )
     print(f"      Resolution : {actual_w} × {actual_h}")
     print(f"      FPS        : {actual_fps:.1f}")
@@ -184,8 +182,8 @@ def main() -> None:
     input_layer.initialize_input_layer(
         config_input_source="camera",
         config_frame_resolution=(actual_w, actual_h),
-        camera_device_index=args.device,
-        use_gstreamer=args.use_gstreamer,
+        camera_device_index=CAMERA_DEVICE,
+        use_gstreamer=USE_GSTREAMER,
     )
 
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
