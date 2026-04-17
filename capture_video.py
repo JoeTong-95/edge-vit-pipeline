@@ -88,20 +88,37 @@ def _fmt_bytes(b: int) -> str:
     return str(b)
 
 
-def _ask_duration(max_seconds: float) -> float:
+def _ask_int(prompt: str, lo: int, hi: int) -> int:
     while True:
-        raw = input(f"  Enter desired recording length in seconds (max {int(max_seconds)}s): ").strip()
+        raw = input(f"  {prompt} [{lo}–{hi}]: ").strip()
         try:
-            val = float(raw)
+            val = int(raw)
         except ValueError:
-            print("  ✗ Please enter a number.")
+            print("  ✗ Please enter a whole number.")
             continue
-        if val <= 0:
-            print("  ✗ Duration must be positive.")
-        elif val > max_seconds:
-            print(f"  ✗ That exceeds the maximum ({int(max_seconds)}s). Try a shorter value.")
-        else:
+        if lo <= val <= hi:
             return val
+        print(f"  ✗ Must be between {lo} and {hi}.")
+
+
+def _ask_duration(max_seconds: float) -> float:
+    max_h = int(max_seconds) // 3600
+    max_m = (int(max_seconds) % 3600) // 60
+    max_s = int(max_seconds) % 60
+    print(f"  Maximum recordable time: {_fmt_duration(max_seconds)}")
+    print()
+    while True:
+        h = _ask_int("Hours  ", 0, max(max_h, 0))
+        m = _ask_int("Minutes", 0, 59)
+        s = _ask_int("Seconds", 0, 59)
+        total = h * 3600 + m * 60 + s
+        if total <= 0:
+            print("  ✗ Duration must be greater than zero.\n")
+        elif total > max_seconds:
+            print(f"  ✗ {h}h {m}m {s}s exceeds the maximum ({_fmt_duration(max_seconds)}). Try again.\n")
+        else:
+            print(f"  ✓ Recording for {h}h {m}m {s}s  ({total}s)")
+            return float(total)
 
 
 def _probe_camera(
