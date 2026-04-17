@@ -12,14 +12,25 @@ This script validates that the input layer can:
 
 Usage
 -----
-    python src/input-layer/test/test_frame_stream.py --path data/test.mp4
-    python src/input-layer/test/test_frame_stream.py --source camera
+    python src/input-layer/test/test_frame_stream.py
+
+Edit the CONFIG section below to change source, path, and resolution.
 """
 
-import argparse
 import os
 import sys
 import time
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CONFIG — edit these values before running
+# ══════════════════════════════════════════════════════════════════════════════
+
+INPUT_SOURCE = "video"          # "video" or "camera"
+VIDEO_PATH   = "data/sample1.mp4"  # path to video file (used when INPUT_SOURCE = "video")
+RESOLUTION   = (640, 480)       # (width, height) in pixels
+CAMERA_DEVICE = 0               # device index (used when INPUT_SOURCE = "camera")
+
+# ══════════════════════════════════════════════════════════════════════════════
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _INPUT_DIR = os.path.abspath(os.path.join(_SCRIPT_DIR, ".."))
@@ -186,14 +197,7 @@ def run_tests(source: str, path: str, resolution: tuple) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Input Layer frame stream test")
-    parser.add_argument("--source", default="video", choices=["video", "camera"])
-    parser.add_argument("--path", default="", help="Video file path")
-    parser.add_argument("--resolution", default="640x480", help="WIDTHxHEIGHT")
-    args = parser.parse_args()
-
-    w, h = (int(x) for x in args.resolution.split("x"))
-    run_tests(source=args.source, path=args.path, resolution=(w, h))
+    run_tests(source=INPUT_SOURCE, path=VIDEO_PATH, resolution=RESOLUTION)
 
 
 if __name__ == "__main__":
