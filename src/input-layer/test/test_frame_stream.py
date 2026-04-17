@@ -30,6 +30,8 @@ CAMERA_DEVICE = 0               # device index — /dev/video0 = 0, /dev/video1 
 RESOLUTION    = (640, 480)      # (width, height) in pixels
 VIDEO_PATH    = "data/sample1.mp4"  # only used when INPUT_SOURCE = "video"
 
+SHOW_PREVIEW  = True            # show a live OpenCV window while streaming frames
+
 # ══════════════════════════════════════════════════════════════════════════════
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -153,8 +155,13 @@ def run_tests(source: str, path: str, resolution: tuple) -> None:
     # ------------------------------------------------------------------
     # Test 5: Stream N frames and print indices
     # ------------------------------------------------------------------
+    import cv2
+
     n_stream = 10
+    preview_label = "test_frame_stream — press Q to stop"
     print(f"\n[Test 5] Stream {n_stream} more frames (print frame index)")
+    if SHOW_PREVIEW:
+        _info("Preview window open — press Q to quit early.")
     stream_ok = True
     for i in range(n_stream):
         raw = layer.read_next_frame()
@@ -165,11 +172,18 @@ def run_tests(source: str, path: str, resolution: tuple) -> None:
         print(f"    frame_id={pkg.input_layer_frame_id}  "
               f"resolution={pkg.input_layer_resolution}  "
               f"timestamp={pkg.input_layer_timestamp:.3f}")
+        if SHOW_PREVIEW:
+            cv2.imshow(preview_label, pkg.input_layer_image)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                _info("Preview closed by user.")
+                break
         if pkg.input_layer_frame_id != i + 2:  # +2 because we already read one
             _fail(f"Expected frame_id {i + 2}, got {pkg.input_layer_frame_id}")
             stream_ok = False
             failed += 1
             break
+    if SHOW_PREVIEW:
+        cv2.destroyAllWindows()
     if stream_ok:
         _pass("Frame indices are monotonically increasing.")
         passed += 1
