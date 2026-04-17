@@ -198,7 +198,8 @@ def run_tests(source: str, path: str, resolution: tuple) -> None:
 
 
 def main():
-    run_tests(source=INPUT_SOURCE, path=VIDEO_PATH, resolution=RESOLUTION)
+    path = VIDEO_PATH if INPUT_SOURCE == "video" else ""
+    run_tests(source=INPUT_SOURCE, path=path, resolution=RESOLUTION)
 
 
 if __name__ == "__main__":
