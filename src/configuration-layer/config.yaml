@@ -13,14 +13,14 @@ config_yolo_model: yolo11n_6class_finetuned.engine               # ultralytics .
 config_yolo_confidence_threshold: 0.4                            # float [0.0, 1.0]; higher = stricter boxes
 config_yolo_imgsz:                                               # [H, W] for non-square TRT engines; null = model default (640)
 config_vlm_enabled: true                                         # options: true | false
-config_vlm_model: src/vlm-layer/Qwen3.5-0.8B                    # local VLM dir path; required if vlm enabled
-config_vlm_device:                                               # overrides config_device for VLM only; empty = inherit config_device
+config_vlm_model: src/vlm-layer/SmolVLM-256M-Instruct           # local VLM dir path; required if vlm enabled
+config_vlm_device: cuda                                          # overrides config_device for VLM only; empty = inherit config_device
 config_vlm_crop_feedback_enabled: false                          # options: true | false | caveat: unstable — keep false
-config_vlm_crop_cache_size: 12                                   # int > 0; rolling crops per track before dispatch
+config_vlm_crop_cache_size: 4                                    # int > 0; rolling crops per track before dispatch
 config_vlm_dead_after_lost_frames: 30                            # int > 0; lost streak before track marked dead
 config_vlm_runtime_mode: async                                   # options: inline | async | spill (see # below)
 config_vlm_worker_max_queue_size: 64                             # int > 0; async/spill only; queue before block/spill
-config_vlm_worker_batch_size: 4                                  # int > 0; microbatch cap; 1 = no batching
+config_vlm_worker_batch_size: 1                                  # int > 0; microbatch cap; 1 = no batching
 config_vlm_worker_batch_wait_ms: 24                              # int >= 0; ms to wait to fill batch (async/spill)
 config_vlm_worker_spill_queue_path: data/vlm_spill_queue.jsonl    # path; required if mode=spill; JSONL append
 config_vlm_spill_max_file_mb: 512                                # float >= 0; rotate spill file at this MB; 0 = no rotate
