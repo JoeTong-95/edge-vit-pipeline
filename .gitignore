@@ -27,16 +27,17 @@ data/*.jsonl
 src/vlm-layer/benchmark/*.png
 
 # ---------------------------------------------------------------------------
-# Data videos SHOULD be tracked / synced
+# Data videos SHOULD not be tracked / synced
 # ---------------------------------------------------------------------------
-!data/*.mp4
+data/*.mp4
+data/captures/*.mp4
 
 # Local scheduled captures can be very large; keep them on-device unless
 # explicitly curated for version control.
 data/captures/
 
-# Keep the curated conversion asset in MISC even though generic ONNX files are ignored.
-!MISC/*.onnx
+# Keep the curated YOLO conversion asset even though generic ONNX files are ignored.
+!src/yolo-layer/models/yolo11n_6class_finetuned.onnx
 
 # ---------------------------------------------------------------------------
 # TRT calibration artifacts (generated locally, large)

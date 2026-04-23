@@ -68,6 +68,20 @@ A few config values are especially important for the optional VLM path:
 2. Use the layer-local README files for runnable examples and practical commands.
 3. For current YOLO detector tag policy, read `src/yolo-layer/TAG_FILTER_BEHAVIOR.md`. That document explains which detector labels are forwarded downstream right now and notes that editing `src/yolo-layer/class_map.py` changes the Python pipeline's detector behavior.
 4. Treat helper scripts as orchestration utilities that must stay compatible with the pipeline contract.
+
+## Current Target Vehicle Scope
+
+For the current project, the only detector labels we care about downstream are:
+
+- `pickup`
+- `van`
+- `truck`
+- `bus`
+
+Important note:
+
+- if a YOLO model exposes additional classes such as `car`, `motorcycle`, or other road-object labels, those are out of scope for the current pipeline objective
+- downstream tracking, cropper, VLM, review, and report work should be interpreted around the four target vehicle types above
 ## VLM Ack Loop
 
 The current branch also implements a stricter optional VLM dispatch loop around the documented cropper and state layers:
@@ -85,7 +99,7 @@ The current branch also implements a stricter optional VLM dispatch loop around 
 
 Short version:
 
-- VLM first decides whether the crop is one of the currently active YOLO labels, such as `truck` or `bus`
+- VLM first decides whether the crop is one of the currently active YOLO labels, currently `pickup`, `van`, `truck`, or `bus`
 - if yes, it returns a small rigid JSON payload
 - the current JSON focuses on:
   - `wheel_count`
@@ -137,8 +151,8 @@ The current target-label gate also adds a terminal split:
   this session.
 - Replaced the older truck-subtype-focused description with the current
   narrower target-label gate:
-  first decide whether the crop matches an active YOLO label such as `truck`
-  or `bus`, then if yes return rigid JSON.
+  first decide whether the crop matches one of the active target vehicle
+  labels: `pickup`, `van`, `truck`, or `bus`, then if yes return rigid JSON.
 - Documented that the active VLM JSON now focuses on:
   - `wheel_count`
   - `estimated_weight_kg`

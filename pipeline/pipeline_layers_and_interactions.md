@@ -102,7 +102,7 @@ This is a strong integration role because these layers sit at the boundary betwe
 
 The current VLM contract is intentionally narrow:
 
-- first decide whether the crop is one of the currently active YOLO labels, such as `truck` or `bus`
+- first decide whether the crop is one of the currently active YOLO target labels: `pickup`, `van`, `truck`, or `bus`
 - if not, return `is_truck=false` and acknowledge the track with reason `no`
 - if yes, return a small JSON payload with only:
   - `wheel_count`
@@ -113,6 +113,7 @@ The current VLM contract is intentionally narrow:
 Important notes:
 
 - the allowed label set comes from the currently active detector-label filter, not from a separate semantic vocabulary
+- for the current repo objective, labels outside `pickup`, `van`, `truck`, and `bus` are out of scope even if a detector model can emit them
 - `retry_reasons` is the structured explanation for a bad crop
 - the currently allowed retry reasons are:
   - `occluded`
@@ -350,7 +351,8 @@ Config parameters used:
 
 Important note:
 
-- the bundled YOLO weights may know many labels, but the current repo only forwards classes listed in `src/yolo-layer/class_map.py`
+- the bundled YOLO weights may know many labels, but the current repo only forwards the active target vehicle classes listed in `src/yolo-layer/class_map.py`
+- the current project scope only cares about `pickup`, `van`, `truck`, and `bus`; other labels offered by a detector are ignored downstream
 - `src/yolo-layer/TAG_FILTER_BEHAVIOR.md` is the practical reference for what the current filter keeps versus discards
 - editing `class_map.py` changes what reaches downstream tracking, cropper, and VLM helper visualizers
 
@@ -724,7 +726,7 @@ Internal functions:
 
 Expected `vehicle_semantics_v1` behavior:
 
-- the prompt should first ask: is this one of the currently active YOLO labels, such as `truck` or `bus`?
+- the prompt should first ask: is this one of the currently active YOLO target labels: `pickup`, `van`, `truck`, or `bus`?
 - if no: return `is_truck=false`, `ack_status=accepted`, and no retry reasons
 - if yes and the image is good enough: return rigid JSON with `wheel_count`, `estimated_weight_kg`, `ack_status=accepted`, and `retry_reasons=[]`
 - if yes but the image is not good enough: return rigid JSON with `ack_status=retry_requested` plus one or more retry reasons such as `occluded` or `bad_angle`
@@ -1048,6 +1050,5 @@ The next useful document should be a strict layer-to-layer interface table with 
 - required fields
 - optional fields
 - notes
-
 
 
