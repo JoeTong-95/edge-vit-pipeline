@@ -9,6 +9,8 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
+from backends import resolve_vlm_backend_name, resolve_vlm_backend_runtime_kind
+
 
 LAYER_DIR = Path(__file__).resolve().parent
 REPO_ROOT = LAYER_DIR.parent.parent
@@ -39,6 +41,7 @@ def _set_decoder_only_processor_left_padding(processor: Any) -> None:
 @dataclass(slots=True)
 class VLMConfig:
     config_vlm_enabled: bool = False
+    config_vlm_backend: str = "auto"
     config_vlm_model: str = str(DEFAULT_VLM_MODEL_PATH)
     config_device: str = "auto"
 
@@ -80,8 +83,10 @@ class VLMAckPackage:
 @dataclass(slots=True)
 class VLMRuntimeState:
     config_vlm_enabled: bool
+    config_vlm_backend: str
     config_vlm_model: str
     config_device: str
+    vlm_runtime_backend_kind: str
     vlm_runtime_device: str
     vlm_runtime_dtype: str
     vlm_runtime_model_id: str
@@ -95,8 +100,10 @@ def initialize_vlm_layer(config: VLMConfig) -> VLMRuntimeState:
     if not config.config_vlm_enabled:
         return VLMRuntimeState(
             config_vlm_enabled=False,
+            config_vlm_backend=str(config.config_vlm_backend or "auto"),
             config_vlm_model=config.config_vlm_model,
             config_device=config.config_device,
+            vlm_runtime_backend_kind="disabled",
             vlm_runtime_device="disabled",
             vlm_runtime_dtype="disabled",
             vlm_runtime_model_id=Path(config.config_vlm_model).name or "disabled",
@@ -116,6 +123,19 @@ def initialize_vlm_layer(config: VLMConfig) -> VLMRuntimeState:
         raise ModuleNotFoundError(
             "transformers is required to initialize the VLM layer."
         ) from exc
+
+    resolved_backend_name = resolve_vlm_backend_name(
+        config_vlm_backend=config.config_vlm_backend,
+        config_vlm_model=config.config_vlm_model,
+    )
+    runtime_backend_kind = resolve_vlm_backend_runtime_kind(
+        config_vlm_backend=config.config_vlm_backend,
+        config_vlm_model=config.config_vlm_model,
+    )
+    if runtime_backend_kind != "huggingface_local":
+        raise NotImplementedError(
+            f"VLM backend '{resolved_backend_name}' is configured but not implemented yet in this branch."
+        )
 
     model_path = Path(config.config_vlm_model).expanduser().resolve()
     if not model_path.exists():
@@ -151,8 +171,10 @@ def initialize_vlm_layer(config: VLMConfig) -> VLMRuntimeState:
 
     return VLMRuntimeState(
         config_vlm_enabled=True,
+        config_vlm_backend=resolved_backend_name,
         config_vlm_model=str(model_path),
         config_device=config.config_device,
+        vlm_runtime_backend_kind=runtime_backend_kind,
         vlm_runtime_device=runtime_device,
         vlm_runtime_dtype=str(runtime_dtype),
         vlm_runtime_model_id=model_path.name,

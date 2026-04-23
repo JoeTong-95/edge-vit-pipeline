@@ -11,6 +11,7 @@ CONFIG_ALLOWED_KEYS = {
     "config_yolo_confidence_threshold",
     "config_yolo_imgsz",
     "config_vlm_enabled",
+    "config_vlm_backend",
     "config_vlm_model",
     "config_vlm_device",
     "config_vlm_crop_feedback_enabled",
@@ -29,6 +30,13 @@ CONFIG_ALLOWED_KEYS = {
 }
 
 CONFIG_ALLOWED_VLM_RUNTIME_MODES = {"inline", "async", "spill"}
+CONFIG_ALLOWED_VLM_BACKENDS = {
+    "auto",
+    "huggingface_local",
+    "smolvlm_256m",
+    "qwen_0_8b",
+    "gemini_e2b",
+}
 
 CONFIG_ALLOWED_DEVICES = {"cpu", "cuda"}
 CONFIG_ALLOWED_INPUT_SOURCES = {"camera", "video"}

@@ -7,6 +7,7 @@ from config_schema import (
     CONFIG_ALLOWED_DEVICES,
     CONFIG_ALLOWED_INPUT_SOURCES,
     CONFIG_ALLOWED_KEYS,
+    CONFIG_ALLOWED_VLM_BACKENDS,
     CONFIG_ALLOWED_VLM_RUNTIME_MODES,
     CONFIG_REQUIRED_PATH_INPUT_SOURCE,
 )
@@ -80,6 +81,12 @@ def validate_config_values(config: ConfigurationLayerConfig | Mapping[str, Any])
 
     if config_values["config_vlm_enabled"] and not config_values["config_vlm_model"]:
         raise ValueError("config_vlm_model is required when config_vlm_enabled is true.")
+
+    vlm_backend = str(config_values.get("config_vlm_backend") or "auto").strip().lower()
+    if vlm_backend not in CONFIG_ALLOWED_VLM_BACKENDS:
+        raise ValueError(
+            f"config_vlm_backend must be one of {sorted(CONFIG_ALLOWED_VLM_BACKENDS)}."
+        )
 
     vlm_device_override = str(config_values.get("config_vlm_device") or "").strip()
     if vlm_device_override and vlm_device_override not in CONFIG_ALLOWED_DEVICES:
