@@ -87,6 +87,8 @@ def validate_config_values(config: ConfigurationLayerConfig | Mapping[str, Any])
         raise ValueError(
             f"config_vlm_backend must be one of {sorted(CONFIG_ALLOWED_VLM_BACKENDS)}."
         )
+    if vlm_backend == "gemini_e2b" and not str(config_values.get("config_vlm_api_key_env") or "").strip():
+        raise ValueError("config_vlm_api_key_env is required when config_vlm_backend is 'gemini_e2b'.")
 
     vlm_device_override = str(config_values.get("config_vlm_device") or "").strip()
     if vlm_device_override and vlm_device_override not in CONFIG_ALLOWED_DEVICES:

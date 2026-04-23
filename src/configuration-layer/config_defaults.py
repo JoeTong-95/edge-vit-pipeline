@@ -13,6 +13,7 @@ DEFAULT_CONFIG_VALUES = {
     "config_vlm_enabled": False,
     "config_vlm_backend": "auto",
     "config_vlm_model": "",
+    "config_vlm_api_key_env": "GEMINI_API_KEY",
     "config_vlm_device": "",
     "config_vlm_crop_feedback_enabled": True,
     "config_vlm_crop_cache_size": 5,

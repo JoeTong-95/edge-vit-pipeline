@@ -66,6 +66,11 @@ Those responsibilities stay with the tracking, vehicle state, and metadata layer
   - local default model artifacts used by this layer implementation
   - currently used as the default `config_vlm_model` path
 
+- `backends/`
+  - backend adapters for:
+    - local Hugging Face checkpoints
+    - remote Gemini API calls
+
 - `Archive/`
   - previous standalone experimentation scripts and utilities
   - not treated as the active layer implementation
@@ -104,7 +109,24 @@ The implementation defines explicit Python dataclasses for the key package contr
     - `config_vlm_enabled`
     - `config_vlm_backend`
     - `config_vlm_model`
+    - `config_vlm_api_key_env`
     - `config_device`
+
+## Backend Status
+
+Current backend implementations:
+
+- `smolvlm_256m`
+  - local Hugging Face checkpoint
+  - supports `cpu` and `cuda`
+- `qwen_0_8b`
+  - local Hugging Face checkpoint
+  - supports `cpu` and `cuda`
+- `gemini_e2b`
+  - remote Gemini API backend
+  - uses `config_vlm_model` as the remote model name
+  - uses `config_vlm_api_key_env` for the API key
+  - does not use local `cpu` / `cuda` execution
 
 - `VLMFrameCropperLayerPackage`
   - includes:
