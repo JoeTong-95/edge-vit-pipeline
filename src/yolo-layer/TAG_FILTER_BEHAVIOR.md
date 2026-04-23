@@ -7,7 +7,7 @@ This document explains the difference between:
 
 ## Short Version
 
-The bundled YOLO models in `src/yolo-layer/models/` are COCO-style pretrained detectors with many labels.
+The bundled YOLO models in `src/yolo-layer/models/` may know more labels than the pipeline actually uses.
 
 The pipeline does **not** forward all of those labels.
 
@@ -23,15 +23,16 @@ Instead, the project applies a class filter in `class_map.py`, and only the IDs 
 
 That means commenting out, removing, or adding entries in `class_map.py` directly changes runtime detector behavior for the whole Python pipeline path.
 
-## Current Forwarded Tags
+## Current Target Tags
 
 The current `TARGET_CLASSES` map is:
 
 ```python
 TARGET_CLASSES = {
-    2: "car",
-    7: "truck",
-    5: "bus",
+    1: "pickup",
+    2: "van",
+    3: "truck",
+    4: "bus",
 }
 ```
 
@@ -39,11 +40,12 @@ These are the only classes currently forwarded downstream.
 
 ## Current Practical Meaning
 
-- `truck`: large trucks that COCO-style YOLO labels as truck
-- `bus`: large vehicles that YOLO labels as bus
-- `car`: generic road-vehicle bucket that often includes sedans, SUVs, pickups, vans, and other smaller vehicle shapes
+- `pickup`: pickup trucks
+- `van`: vans and similar van-like vehicles
+- `truck`: large trucks and truck-like heavy vehicles
+- `bus`: buses and similar large passenger vehicles
 
-This is why SUV-like vehicles may appear as `car` instead of a finer subtype.
+These four labels are the current project target classes.
 
 ## What Will Not Be Forwarded Right Now
 
@@ -61,7 +63,7 @@ Examples of currently discarded COCO labels include:
 - `stop sign`
 - `dog`
 
-And, more generally, every COCO label except `car`, `bus`, and `truck`.
+And, more generally, every detector label outside `pickup`, `van`, `truck`, and `bus`.
 
 ## How To Change Behavior
 
@@ -77,9 +79,10 @@ Example:
 
 ```python
 TARGET_CLASSES = {
-    2: "car",
-    5: "bus",
-    7: "truck",
+    1: "pickup",
+    2: "van",
+    3: "truck",
+    4: "bus",
 }
 ```
 
@@ -87,23 +90,24 @@ If you changed it to:
 
 ```python
 TARGET_CLASSES = {
-    7: "truck",
+    3: "truck",
 }
 ```
 
-then only YOLO detections with COCO class ID `7` would survive filtering.
+then only detections with the model's `truck` class ID would survive filtering.
 
 If you changed it to:
 
 ```python
 TARGET_CLASSES = {
-    2: "road_vehicle",
-    5: "road_vehicle",
-    7: "road_vehicle",
+    1: "target_vehicle",
+    2: "target_vehicle",
+    3: "target_vehicle",
+    4: "target_vehicle",
 }
 ```
 
-then all three classes would still be forwarded, but downstream code would see the shared label `road_vehicle`.
+then all four target classes would still be forwarded, but downstream code would see the shared label `target_vehicle`.
 
 ## Important Caveat
 
@@ -111,8 +115,8 @@ Changing `class_map.py` changes the project filter, not the underlying weight fi
 
 So:
 
-- adding `2: "car"` does not teach the model a new class
-- removing `2: "car"` does not remove that class from the weight file
+- adding a mapping does not teach the model a new class
+- removing a mapping does not remove that class from the weight file
 - it only changes whether the pipeline keeps or discards that predicted class
 
 ## Recommendation

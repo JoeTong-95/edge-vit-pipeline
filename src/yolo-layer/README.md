@@ -9,7 +9,8 @@ This layer owns vehicle detection and produces the documented `yolo_layer_packag
 - `TAG_FILTER_BEHAVIOR.md`: explains exactly which YOLO tags are currently forwarded downstream and how editing `class_map.py` changes pipeline behavior
 - `util/visualize_yolo.py`: config-driven visualization helper for YOLO-only runs
 - `test/test_yolo_layer.py`: layer-local test script
-- `models/`: bundled local weights such as `yolov8n.pt`, `yolov10n.pt`, `yolov11n.pt`, and `yolov11v28_jingtao.pt`
+- `models/`: bundled local weights such as `yolov8n.pt`, `yolov10n.pt`, `yolov11n.pt`, `yolov11v28_jingtao.pt`, and `yolo11n_6class_finetuned.pt`
+- `MODEL_yolo11n_6class_finetuned.md`: notes for the current 6-class fine-tuned YOLOv11n model and its TRT conversion path
 
 ## Public API
 
@@ -49,7 +50,8 @@ If `--save-metrics` is enabled, the script stores run metadata and frame-level m
 ## Notes
 
 - Bundled local weights are preferred before Ultralytics falls back to external lookup.
-- `class_map.py` is model-specific policy, not a universal COCO truth table. The current active map is tuned for `yolov11v28_jingtao.pt`, which uses a custom vehicle taxonomy (`pickup_truck`, `bus`, `van`, `tow_truck`, `semi_truck`, `box_truck`, `dump_truck`) rather than COCO IDs.
+- `class_map.py` is model-specific policy, not a universal COCO truth table. The current project only cares about `pickup`, `van`, `truck`, and `bus` downstream.
+- Even if a detector model exposes additional labels such as `car` or `motorcycle`, those are out of scope for the current pipeline objective and should not be treated as target detections in downstream analysis.
 - `TAG_FILTER_BEHAVIOR.md` is the explicit reference for what is detected versus discarded in the current repo. Editing `class_map.py` changes detector policy for the Python pipeline and visualizers accordingly.
 - `cuda` only works if the active Python environment has CUDA-enabled PyTorch.
 - The visualizer writes an annotated MP4 by default and can also show a live preview window.
@@ -69,7 +71,6 @@ If `--save-metrics` is enabled, the script stores run metadata and frame-level m
 - Added `TAG_FILTER_BEHAVIOR.md` to document the difference between the bundled YOLO weight taxonomy and the repo's active downstream class filter.
 - Documented that `class_map.py` is the switchboard for detector tag policy: adding, removing, or renaming entries changes what the Python pipeline keeps after YOLO inference.
 - Updated `README.md` to point to `TAG_FILTER_BEHAVIOR.md` as the reference for current forwarded versus discarded detector tags.
-- Expanded the current target classes to include `car` alongside `bus` and `truck`, so SUV-like vehicles, pickups, and vans that COCO-style YOLO often collapses into `car` now reach downstream logic.
 - Updated `detector.py` so when ROI is active and locked, YOLO uses the actual ROI crop shape as `imgsz` for inference instead of reverting to the model's default square input size. This makes ROI-cropped inference meaningfully different from full-frame inference in compute cost.
 - Rounded ROI-driven `imgsz` up to stride-safe multiples inside `detector.py` before calling Ultralytics, so the ROI path no longer emits repeated runtime warnings about auto-adjusted image sizes.
 

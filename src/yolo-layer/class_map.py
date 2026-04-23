@@ -5,8 +5,9 @@
 # Everything else YOLO detects gets discarded.
 #
 # ACTIVE MODEL:
-# - This active map is specific to the 6-class YOLOv11n fine-tune added under
-#   MISC/ and deployed as src/yolo-layer/models/yolo11n_6class_finetuned.engine.
+# - This active map is specific to the 6-class YOLOv11n fine-tune stored under
+#   src/yolo-layer/models/ and deployed as
+#   src/yolo-layer/models/yolo11n_6class_finetuned.engine.
 # - That checkpoint uses a compact vehicle taxonomy tuned for traffic scenes.
 #
 # WHY THESE ACTIVE CLASSES:
