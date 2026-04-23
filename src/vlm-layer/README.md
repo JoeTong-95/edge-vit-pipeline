@@ -9,6 +9,7 @@ The layer adds semantic enrichment beyond detector classes.
 It is responsible for:
 
 - loading the configured VLM model
+- selecting the configured VLM backend family
 - receiving an object crop package from the cropper layer
 - preparing a semantic query
 - running inference on the crop
@@ -101,6 +102,7 @@ The implementation defines explicit Python dataclasses for the key package contr
 - `VLMConfig`
   - includes:
     - `config_vlm_enabled`
+    - `config_vlm_backend`
     - `config_vlm_model`
     - `config_device`
 
