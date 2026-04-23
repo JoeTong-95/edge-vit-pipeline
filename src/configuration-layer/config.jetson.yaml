@@ -34,6 +34,7 @@ config_yolo_imgsz:
 config_vlm_enabled: true
 config_vlm_backend: smolvlm_256m
 config_vlm_model: src/vlm-layer/SmolVLM-256M-Instruct
+config_vlm_api_key_env: GEMINI_API_KEY
 # VLM runs on CPU: Jetson NvMap carve-out (~1.5 GB) is fully consumed by the
 # VLM weights (1.7 GB), leaving no room for YOLO conv activations.
 # YOLO is latency-critical (every frame) so it keeps GPU.

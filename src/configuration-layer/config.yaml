@@ -15,6 +15,7 @@ config_yolo_imgsz:                                               # [H, W] for no
 config_vlm_enabled: true                                         # options: true | false
 config_vlm_backend: smolvlm_256m                                 # options: auto | huggingface_local | smolvlm_256m | qwen_0_8b | gemini_e2b
 config_vlm_model: src/vlm-layer/SmolVLM-256M-Instruct           # local VLM dir path; required if vlm enabled
+config_vlm_api_key_env: GEMINI_API_KEY                           # env var for remote Gemini backend; ignored for local HF backends
 config_vlm_device: cuda                                          # overrides config_device for VLM only; empty = inherit config_device
 config_vlm_crop_feedback_enabled: false                          # options: true | false | caveat: unstable — keep false
 config_vlm_crop_cache_size: 4                                    # int > 0; rolling crops per track before dispatch
@@ -42,6 +43,7 @@ config_evaluation_output_enabled: false                          # options: true
 # config_vlm_enabled — Turns on VLM model load and semantic inference on vehicle crops.
 # config_vlm_backend — Selects the VLM backend family; `auto` infers from the configured model path.
 # config_vlm_model — Directory path containing the Hugging Face–style VLM weights and config.
+# config_vlm_api_key_env — Environment variable that holds the Gemini API key when using the remote Gemini backend.
 # config_vlm_crop_feedback_enabled — If true, uses VLM ack/retry to refine crops; currently unreliable—leave false.
 # config_vlm_crop_cache_size — How many recent scored crops per track are retained for best-crop selection.
 # config_vlm_dead_after_lost_frames — Consecutive tracker “lost” updates before the cropper treats the track as dead.

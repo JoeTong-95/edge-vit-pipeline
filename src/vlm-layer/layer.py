@@ -9,7 +9,12 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
-from backends import resolve_vlm_backend_name, resolve_vlm_backend_runtime_kind
+from backends import (
+    gemini_e2b,
+    huggingface_local,
+    resolve_vlm_backend_name,
+    resolve_vlm_backend_runtime_kind,
+)
 
 
 LAYER_DIR = Path(__file__).resolve().parent
@@ -43,6 +48,7 @@ class VLMConfig:
     config_vlm_enabled: bool = False
     config_vlm_backend: str = "auto"
     config_vlm_model: str = str(DEFAULT_VLM_MODEL_PATH)
+    config_vlm_api_key_env: str = "GEMINI_API_KEY"
     config_device: str = "auto"
 
 
@@ -85,11 +91,13 @@ class VLMRuntimeState:
     config_vlm_enabled: bool
     config_vlm_backend: str
     config_vlm_model: str
+    config_vlm_api_key_env: str
     config_device: str
     vlm_runtime_backend_kind: str
     vlm_runtime_device: str
     vlm_runtime_dtype: str
     vlm_runtime_model_id: str
+    vlm_runtime_backend_state: dict[str, Any] = field(default_factory=dict)
     vlm_runtime_processor: Any = None
     vlm_runtime_model: Any = None
     vlm_runtime_torch: Any = None
@@ -102,27 +110,13 @@ def initialize_vlm_layer(config: VLMConfig) -> VLMRuntimeState:
             config_vlm_enabled=False,
             config_vlm_backend=str(config.config_vlm_backend or "auto"),
             config_vlm_model=config.config_vlm_model,
+            config_vlm_api_key_env=str(config.config_vlm_api_key_env or "GEMINI_API_KEY"),
             config_device=config.config_device,
             vlm_runtime_backend_kind="disabled",
             vlm_runtime_device="disabled",
             vlm_runtime_dtype="disabled",
             vlm_runtime_model_id=Path(config.config_vlm_model).name or "disabled",
         )
-
-    try:
-        import torch
-    except ModuleNotFoundError as exc:
-        raise ModuleNotFoundError(
-            "PyTorch is required to initialize the VLM layer at runtime."
-        ) from exc
-
-    try:
-        import transformers
-        from transformers import AutoProcessor
-    except ModuleNotFoundError as exc:
-        raise ModuleNotFoundError(
-            "transformers is required to initialize the VLM layer."
-        ) from exc
 
     resolved_backend_name = resolve_vlm_backend_name(
         config_vlm_backend=config.config_vlm_backend,
@@ -132,55 +126,36 @@ def initialize_vlm_layer(config: VLMConfig) -> VLMRuntimeState:
         config_vlm_backend=config.config_vlm_backend,
         config_vlm_model=config.config_vlm_model,
     )
-    if runtime_backend_kind != "huggingface_local":
+    if runtime_backend_kind == "huggingface_local":
+        backend_state = huggingface_local.initialize_backend(
+            backend_name=resolved_backend_name,
+            model_path=config.config_vlm_model,
+            requested_device=config.config_device,
+        )
+    elif runtime_backend_kind == "gemini_e2b":
+        backend_state = gemini_e2b.initialize_backend(
+            model_name=config.config_vlm_model,
+            api_key_env=config.config_vlm_api_key_env,
+        )
+    else:
         raise NotImplementedError(
             f"VLM backend '{resolved_backend_name}' is configured but not implemented yet in this branch."
         )
 
-    model_path = Path(config.config_vlm_model).expanduser().resolve()
-    if not model_path.exists():
-        raise FileNotFoundError(f"Configured VLM model path was not found: {model_path}")
-
-    _maybe_require_newer_transformers_for_checkpoint(model_path=model_path)
-
-    runtime_device = _resolve_device(torch=torch, requested_device=config.config_device)
-    # Use bfloat16 on CUDA — this is the model's native dtype and avoids a
-    # float16 conversion during weight loading that can trigger the Jetson
-    # NvMap / CUDACachingAllocator bug on unified-memory devices.
-    runtime_dtype = torch.bfloat16 if runtime_device == "cuda" else torch.float32
-
-    try:
-        processor = AutoProcessor.from_pretrained(
-            model_path,
-            trust_remote_code=True,
-            local_files_only=True,
-        )
-        _set_decoder_only_processor_left_padding(processor)
-        model_class = _load_model_class(transformers)
-        model = model_class.from_pretrained(
-            model_path,
-            torch_dtype=runtime_dtype,
-            trust_remote_code=True,
-            local_files_only=True,
-        )
-    except (KeyError, ValueError) as exc:
-        _raise_if_unsupported_qwen35_model_type(exc)
-        raise
-    model = model.to(runtime_device)
-    model.eval()
-
     return VLMRuntimeState(
         config_vlm_enabled=True,
         config_vlm_backend=resolved_backend_name,
-        config_vlm_model=str(model_path),
+        config_vlm_model=str(config.config_vlm_model),
+        config_vlm_api_key_env=str(config.config_vlm_api_key_env or "GEMINI_API_KEY"),
         config_device=config.config_device,
         vlm_runtime_backend_kind=runtime_backend_kind,
-        vlm_runtime_device=runtime_device,
-        vlm_runtime_dtype=str(runtime_dtype),
-        vlm_runtime_model_id=model_path.name,
-        vlm_runtime_processor=processor,
-        vlm_runtime_model=model,
-        vlm_runtime_torch=torch,
+        vlm_runtime_device=str(backend_state.get("runtime_device", "remote")),
+        vlm_runtime_dtype=str(backend_state.get("runtime_dtype", "remote")),
+        vlm_runtime_model_id=str(backend_state.get("model_id", config.config_vlm_model)),
+        vlm_runtime_backend_state=dict(backend_state),
+        vlm_runtime_processor=backend_state.get("processor"),
+        vlm_runtime_model=backend_state.get("model"),
+        vlm_runtime_torch=backend_state.get("torch"),
     )
 
 
@@ -360,42 +335,21 @@ def infer_vlm_semantics(
 ) -> str:
     """Run the model on the crop image and return raw decoded text."""
     image = _coerce_image(vlm_frame_cropper_layer_package.vlm_frame_cropper_layer_image)
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {"type": "image"},
-                {"type": "text", "text": vlm_prompt_text},
-            ],
-        }
-    ]
-
-    processor = vlm_runtime_state.vlm_runtime_processor
-    prompt_text = _apply_chat_template(processor=processor, messages=messages)
-    inputs = processor(
-        text=[prompt_text],
-        images=[image],
-        return_tensors="pt",
-    )
-    inputs = _move_inputs_to_device(
-        inputs=inputs,
-        device=vlm_runtime_state.vlm_runtime_device,
-    )
-
-    with vlm_runtime_state.vlm_runtime_torch.inference_mode():
-        generated_ids = vlm_runtime_state.vlm_runtime_model.generate(
-            **inputs,
-            max_new_tokens=24,
-            do_sample=False,
+    if vlm_runtime_state.vlm_runtime_backend_kind == "huggingface_local":
+        return huggingface_local.infer_single(
+            backend_state=vlm_runtime_state.vlm_runtime_backend_state,
+            image=image,
+            prompt_text=vlm_prompt_text,
         )
-
-    prompt_tokens = int(inputs["input_ids"].shape[1])
-    new_token_ids = generated_ids[:, prompt_tokens:]
-    return processor.batch_decode(
-        new_token_ids,
-        skip_special_tokens=True,
-        clean_up_tokenization_spaces=False,
-    )[0].strip()
+    if vlm_runtime_state.vlm_runtime_backend_kind == "gemini_e2b":
+        return gemini_e2b.infer_single(
+            backend_state=vlm_runtime_state.vlm_runtime_backend_state,
+            image=image,
+            prompt_text=vlm_prompt_text,
+        )
+    raise RuntimeError(
+        f"Unsupported VLM runtime backend kind: {vlm_runtime_state.vlm_runtime_backend_kind}"
+    )
 
 
 def infer_vlm_semantics_batch(
@@ -413,60 +367,21 @@ def infer_vlm_semantics_batch(
         _coerce_image(pkg.vlm_frame_cropper_layer_image)
         for pkg in vlm_frame_cropper_layer_packages
     ]
-    processor = vlm_runtime_state.vlm_runtime_processor
-    prompt_texts: list[str] = []
-    for prompt in vlm_prompt_texts:
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image"},
-                    {"type": "text", "text": prompt},
-                ],
-            }
-        ]
-        prompt_texts.append(_apply_chat_template(processor=processor, messages=messages))
-
-    inputs = processor(
-        text=prompt_texts,
-        images=images,
-        padding=True,
-        return_tensors="pt",
-    )
-    inputs = _move_inputs_to_device(
-        inputs=inputs,
-        device=vlm_runtime_state.vlm_runtime_device,
-    )
-
-    with vlm_runtime_state.vlm_runtime_torch.inference_mode():
-        generated_ids = vlm_runtime_state.vlm_runtime_model.generate(
-            **inputs,
-            max_new_tokens=24,
-            do_sample=False,
+    if vlm_runtime_state.vlm_runtime_backend_kind == "huggingface_local":
+        return huggingface_local.infer_batch(
+            backend_state=vlm_runtime_state.vlm_runtime_backend_state,
+            images=images,
+            prompt_texts=vlm_prompt_texts,
         )
-
-    # Decode each item by slicing off its prompt tokens.
-    input_ids = inputs.get("input_ids")
-    if input_ids is None:
-        # Fallback: decode full outputs if input ids unavailable.
-        decoded = processor.batch_decode(
-            generated_ids,
-            skip_special_tokens=True,
-            clean_up_tokenization_spaces=False,
+    if vlm_runtime_state.vlm_runtime_backend_kind == "gemini_e2b":
+        return gemini_e2b.infer_batch(
+            backend_state=vlm_runtime_state.vlm_runtime_backend_state,
+            images=images,
+            prompt_texts=vlm_prompt_texts,
         )
-        return [text.strip() for text in decoded]
-
-    outputs: list[str] = []
-    for row_index in range(int(generated_ids.shape[0])):
-        prompt_tokens = int(input_ids[row_index].shape[0])
-        new_token_ids = generated_ids[row_index:row_index + 1, prompt_tokens:]
-        decoded = processor.batch_decode(
-            new_token_ids,
-            skip_special_tokens=True,
-            clean_up_tokenization_spaces=False,
-        )[0].strip()
-        outputs.append(decoded)
-    return outputs
+    raise RuntimeError(
+        f"Unsupported VLM runtime backend kind: {vlm_runtime_state.vlm_runtime_backend_kind}"
+    )
 
 
 def parse_vlm_response(vlm_layer_raw_text: str) -> dict[str, Any]:
@@ -893,6 +808,15 @@ def preview_vlm_applied_prompt(vlm_runtime_state: VLMRuntimeState, vlm_prompt_te
     """Return the chat-template-expanded prompt string (for debug / visualization)."""
     if not vlm_runtime_state.config_vlm_enabled:
         return ""
+    if vlm_runtime_state.vlm_runtime_backend_kind == "gemini_e2b":
+        return vlm_prompt_text
+    if vlm_runtime_state.vlm_runtime_backend_kind == "huggingface_local":
+        processor = vlm_runtime_state.vlm_runtime_backend_state.get("processor")
+        if processor is not None:
+            return huggingface_local.apply_prompt_template(
+                processor=processor,
+                prompt_text=vlm_prompt_text,
+            )
     messages: list[dict[str, Any]] = [
         {
             "role": "user",

@@ -13,6 +13,7 @@ CONFIG_ALLOWED_KEYS = {
     "config_vlm_enabled",
     "config_vlm_backend",
     "config_vlm_model",
+    "config_vlm_api_key_env",
     "config_vlm_device",
     "config_vlm_crop_feedback_enabled",
     "config_vlm_crop_cache_size",

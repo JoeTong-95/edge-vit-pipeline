@@ -63,6 +63,7 @@ def normalize_config(raw_config: dict[str, Any]) -> ConfigurationLayerConfig:
         config_vlm_enabled=_normalize_bool(merged["config_vlm_enabled"], "config_vlm_enabled"),
         config_vlm_backend=str(merged.get("config_vlm_backend") or "auto").strip().lower(),
         config_vlm_model=str(merged["config_vlm_model"]).strip(),
+        config_vlm_api_key_env=str(merged.get("config_vlm_api_key_env") or "GEMINI_API_KEY").strip(),
         config_vlm_device=str(merged.get("config_vlm_device") or "").strip().lower(),
         config_vlm_crop_feedback_enabled=_normalize_bool(merged["config_vlm_crop_feedback_enabled"], "config_vlm_crop_feedback_enabled"),
         config_vlm_crop_cache_size=int(merged["config_vlm_crop_cache_size"]),

@@ -166,6 +166,7 @@ def main() -> None:
     vlm_enabled = bool(get_config_value(cfg, "config_vlm_enabled"))
     vlm_backend = str(get_config_value(cfg, "config_vlm_backend"))
     vlm_model = str(get_config_value(cfg, "config_vlm_model"))
+    vlm_api_key_env = str(get_config_value(cfg, "config_vlm_api_key_env"))
     _vlm_dev = str(get_config_value(cfg, "config_vlm_device") or "").strip()
     vlm_infer_device = _vlm_dev if _vlm_dev else device
     vlm_crop_cache_size = int(get_config_value(cfg, "config_vlm_crop_cache_size"))
@@ -244,6 +245,7 @@ def main() -> None:
                     config_vlm_enabled=True,
                     config_vlm_backend=vlm_backend,
                     config_vlm_model=_resolve_repo_path(vlm_model),
+                    config_vlm_api_key_env=vlm_api_key_env,
                     config_device=vlm_infer_device,
                 )
             )

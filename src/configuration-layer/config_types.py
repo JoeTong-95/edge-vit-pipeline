@@ -18,6 +18,7 @@ class ConfigurationLayerConfig:
     config_vlm_enabled: bool
     config_vlm_backend: str
     config_vlm_model: str
+    config_vlm_api_key_env: str
     config_vlm_device: str
     config_vlm_crop_feedback_enabled: bool
     config_vlm_crop_cache_size: int
