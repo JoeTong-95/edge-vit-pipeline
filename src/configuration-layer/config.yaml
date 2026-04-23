@@ -9,7 +9,7 @@ config_frame_resolution:                                       # [width, height]
   - 360
 config_roi_enabled: true                                        # options: true | false
 config_roi_vehicle_count_threshold: 20                          # int > 0; boxes counted toward ROI lock
-config_yolo_model: yolov11v28_jingtao.pt                         # ultralytics .pt name/path (speed vs accuracy)
+config_yolo_model: yolo11n_6class_finetuned.engine               # ultralytics .pt name/path (speed vs accuracy)
 config_yolo_confidence_threshold: 0.4                            # float [0.0, 1.0]; higher = stricter boxes
 config_yolo_imgsz:                                               # [H, W] for non-square TRT engines; null = model default (640)
 config_vlm_enabled: true                                         # options: true | false
