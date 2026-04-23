@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """
 initialize_pipeline.py (repo root)
 
@@ -16,6 +17,11 @@ Usage:
 """
 
 from __future__ import annotations
+
+import os as _os_early
+if "PYTORCH_CUDA_ALLOC_CONF" not in _os_early.environ:
+    _os_early.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
+del _os_early
 
 import argparse
 import json
@@ -38,6 +44,7 @@ TRACKING_DIR = SRC_DIR / "tracking-layer"
 VSTATE_DIR = SRC_DIR / "vehicle-state-layer"
 SCENE_DIR = SRC_DIR / "scene-awareness-layer"
 VLM_DIR = SRC_DIR / "vlm-layer"
+VLM_UTIL_DIR = SRC_DIR / "vlm-layer" / "util"
 CROPPER_DIR = SRC_DIR / "vlm-frame-cropper-layer"
 
 for p in (
@@ -49,6 +56,7 @@ for p in (
     VSTATE_DIR,
     SCENE_DIR,
     VLM_DIR,
+    VLM_UTIL_DIR,
     CROPPER_DIR,
 ):
     if p.exists():
@@ -138,13 +146,13 @@ def main() -> None:
     validate_config(cfg)
 
     input_source = str(get_config_value(cfg, "config_input_source"))
-    if input_source != "video":
-        raise RuntimeError("initialize_pipeline.py is video-only. Set config_input_source=video.")
+    if input_source not in ("video", "camera"):
+        raise RuntimeError("initialize_pipeline.py supports video and camera only.")
 
     configured_video_path = str(get_config_value(cfg, "config_input_path"))
     video_path_value = args.video.strip() or configured_video_path
     video_path = _resolve_repo_path(str(video_path_value))
-    if not os.path.exists(video_path):
+    if input_source == "video" and not os.path.exists(video_path):
         raise FileNotFoundError(f"Video path not found: {video_path}")
 
     frame_resolution = tuple(get_config_value(cfg, "config_frame_resolution"))
@@ -174,11 +182,18 @@ def main() -> None:
     mode = "a" if args.append else "w"
 
     input_layer = InputLayer()
-    input_layer.initialize_input_layer(
-        config_input_source="video",
-        config_frame_resolution=frame_resolution,
-        config_input_path=video_path,
-    )
+    if input_source == "camera":
+        input_layer.initialize_input_layer(
+            config_input_source="camera",
+            config_frame_resolution=frame_resolution,
+            camera_device_index=0,
+        )
+    else:
+        input_layer.initialize_input_layer(
+            config_input_source="video",
+            config_frame_resolution=frame_resolution,
+            config_input_path=video_path,
+        )
 
     initialize_roi_layer(config_roi_enabled=roi_enabled, config_roi_vehicle_count_threshold=roi_threshold)
     initialize_yolo_layer(model_name=model, conf_threshold=conf, device=device)
@@ -317,13 +332,27 @@ def main() -> None:
 
     with open(out_path, mode, encoding="utf-8") as out_f:
         max_frames = int(args.max_frames)
+        _pipeline_start_time = time.time()
         while True:
             if max_frames > 0 and frames_done >= max_frames:
                 break
 
             raw = input_layer.read_next_frame()
             if raw is None:
-                break
+                if input_source == "camera":
+                    time.sleep(0.01)  # camera dropped a frame, retry
+                    continue
+                break  # video ended
+
+            # Progress logging every 100 frames
+            if frames_done > 0 and frames_done % 100 == 0:
+                elapsed = time.time() - _pipeline_start_time
+                fps = frames_done / elapsed if elapsed > 0 else 0
+                vlm_status = ""
+                if vlm_worker is not None:
+                    st = vlm_worker.get_status()
+                    vlm_status = f" vlm_queue={st['queue_size']} vlm_done={st['completed_count']}"
+                print(f"[pipeline] frame={frames_done} fps={fps:.1f} vlm_logged={lines_written}{vlm_status}")
             pkg = input_layer.build_input_layer_package(raw)
             input_pkg = {
                 "input_layer_frame_id": pkg.input_layer_frame_id,
@@ -467,15 +496,22 @@ def main() -> None:
         input_layer.close_input_layer()
 
         if vlm_worker is not None:
-            deadline = time.perf_counter() + 300.0
-            while time.perf_counter() < deadline:
+            try:
+                print("[pipeline] Draining VLM worker...")
+                deadline = time.perf_counter() + 30.0
+                while time.perf_counter() < deadline:
+                    drain_vlm_worker(out_f, last_frame_id)
+                    st = vlm_worker.get_status()
+                    if st["queue_size"] == 0 and not st["busy"]:
+                        break
+                    time.sleep(0.02)
                 drain_vlm_worker(out_f, last_frame_id)
-                st = vlm_worker.get_status()
-                if st["queue_size"] == 0 and not st["busy"]:
-                    break
-                time.sleep(0.02)
-            drain_vlm_worker(out_f, last_frame_id)
-            vlm_worker.shutdown()
+            except Exception as exc:
+                print(f"[pipeline] VLM drain error (non-fatal): {exc}")
+            try:
+                vlm_worker.shutdown()
+            except Exception:
+                pass  # suppress thread cleanup crash
 
     print(f"[pipeline] frames={frames_done} vlm_completions_logged={lines_written} output={out_path}")
     print(f"[pipeline] vlm_runtime_mode_effective={vlm_effective_runtime}")

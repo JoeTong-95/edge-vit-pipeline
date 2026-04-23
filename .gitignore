@@ -31,6 +31,13 @@ src/vlm-layer/benchmark/*.png
 # ---------------------------------------------------------------------------
 !data/*.mp4
 
+# Local scheduled captures can be very large; keep them on-device unless
+# explicitly curated for version control.
+data/captures/
+
+# Keep the curated conversion asset in MISC even though generic ONNX files are ignored.
+!MISC/*.onnx
+
 # ---------------------------------------------------------------------------
 # TRT calibration artifacts (generated locally, large)
 # ---------------------------------------------------------------------------
