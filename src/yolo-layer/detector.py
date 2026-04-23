@@ -67,7 +67,7 @@ def initialize_yolo_layer(model_name="yolov8n.pt", conf_threshold=0.25, device="
     import numpy as np
 
     resolved_model_name = _resolve_model_path(model_name)
-    _state["model"] = YOLO(resolved_model_name)
+    _state["model"] = YOLO(resolved_model_name, task="detect")
     _state["conf_threshold"] = conf_threshold
     _state["target_class_ids"] = set(TARGET_CLASSES.keys())
     _state["device"] = device

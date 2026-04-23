@@ -5,8 +5,9 @@
 # Everything else YOLO detects gets discarded.
 #
 # ACTIVE MODEL:
-# - This active map is specific to src/yolo-layer/models/yolov11v28_jingtao.pt.
-# - That checkpoint uses a custom vehicle taxonomy, not COCO IDs.
+# - This active map is specific to the 6-class YOLOv11n fine-tune added under
+#   MISC/ and deployed as src/yolo-layer/models/yolo11n_6class_finetuned.engine.
+# - That checkpoint uses a compact vehicle taxonomy tuned for traffic scenes.
 #
 # WHY THESE ACTIVE CLASSES:
 # - Keep truck-like classes plus bus/van so the downstream truck/VLM pipeline
@@ -14,16 +15,13 @@
 # - Class 0 ("car") remains disabled for now to avoid forwarding every normal
 #   passenger car as a truck candidate.
 #
-# CUSTOM yolov11v28_jingtao.pt IDS:
+# YOLO11N 6-CLASS IDS:
 #   0 = car
-#   1 = pickup_truck
-#   2 = bus
-#   3 = van
-#   4 = tow_truck
-#   5 = semi_truck
-#   6 = box_truck
-#   7 = dump_truck
-#   8 = construction
+#   1 = pickup
+#   2 = van
+#   3 = truck
+#   4 = bus
+#   5 = motorcycle
 #
 # PREVIOUS COCO MAP FOR REFERENCE:
 # - Class 7 ("truck"): semis, box trucks, dump trucks, and other large trucks.
@@ -43,19 +41,10 @@
 #   6 = train
 #   7 = truck
 #
-# TARGET_CLASSES = {
-#     # 2: "car",
-#     7: "truck",
-#     5: "bus",
-# }
-
 TARGET_CLASSES = {
-    # 0: "car",
-    1: "pickup_truck",
-    2: "bus",
-    3: "van",
-    4: "tow_truck",
-    5: "semi_truck",
-    6: "box_truck",
-    7: "dump_truck",
+    0: "car",
+    1: "pickup",
+    2: "van",
+    3: "truck",
+    4: "bus",
 }

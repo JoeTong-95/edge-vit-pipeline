@@ -28,7 +28,7 @@ config_frame_resolution:
   - 360
 config_roi_enabled: true
 config_roi_vehicle_count_threshold: 3
-config_yolo_model: yolov11v28_jingtao.engine
+config_yolo_model: yolo11n_6class_finetuned.engine
 config_yolo_confidence_threshold: 0.4
 config_yolo_imgsz:
 config_vlm_enabled: true
