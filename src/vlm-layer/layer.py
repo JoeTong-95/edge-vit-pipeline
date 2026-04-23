@@ -363,7 +363,7 @@ def infer_vlm_semantics(
     with vlm_runtime_state.vlm_runtime_torch.inference_mode():
         generated_ids = vlm_runtime_state.vlm_runtime_model.generate(
             **inputs,
-            max_new_tokens=64,
+            max_new_tokens=24,
             do_sample=False,
         )
 
@@ -419,7 +419,7 @@ def infer_vlm_semantics_batch(
     with vlm_runtime_state.vlm_runtime_torch.inference_mode():
         generated_ids = vlm_runtime_state.vlm_runtime_model.generate(
             **inputs,
-            max_new_tokens=64,
+            max_new_tokens=24,
             do_sample=False,
         )
 
