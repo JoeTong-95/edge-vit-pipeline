@@ -14,6 +14,9 @@ from pathlib import Path
 from typing import Any
 
 
+TARGET_CLASSES = {"pickup", "van", "truck", "bus"}
+
+
 def utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
@@ -47,6 +50,9 @@ def _load_vlm_rows(review_root: Path, run_id_filter: str = "") -> list[dict[str,
             for row in csv.DictReader(fh):
                 row_run_id = str(row.get("run_id") or run_dir.name)
                 if run_id_filter and row_run_id != run_id_filter:
+                    continue
+                target_class = str(row.get("target_class") or "").strip().lower()
+                if target_class not in TARGET_CLASSES:
                     continue
                 row["run_id"] = row_run_id
                 rows.append(row)
@@ -233,6 +239,7 @@ def run_comparison(review_root: Path, run_id: str = "") -> dict[str, Any]:
             "total_vlm_accepted_targets": total_vlm,
             "vlm_type_agreement_rate": round(_safe_div(type_agree_count, matched_truth_count), 6),
             "vlm_class_agreement_rate": round(_safe_div(class_agree_count, class_comparable_count), 6),
+            "vlm_class_agreement_basis": "detector_target_class_proxy",
             "vlm_retry_rate": round(_safe_div(retry_count, total_vlm), 6),
             "vlm_false_accept_count": false_accept_count,
             "vlm_false_reject_count": false_reject_count,
@@ -275,6 +282,7 @@ def write_markdown(report: dict[str, Any], out_md: Path) -> None:
         f"- total_vlm_accepted_targets: `{v['total_vlm_accepted_targets']}`",
         f"- vlm_type_agreement_rate: `{v['vlm_type_agreement_rate']}`",
         f"- vlm_class_agreement_rate: `{v['vlm_class_agreement_rate']}`",
+        f"- vlm_class_agreement_basis: `{v['vlm_class_agreement_basis']}`",
         f"- vlm_retry_rate: `{v['vlm_retry_rate']}`",
         f"- vlm_false_accept_count: `{v['vlm_false_accept_count']}`",
         f"- vlm_false_reject_count: `{v['vlm_false_reject_count']}`",
