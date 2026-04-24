@@ -51,7 +51,7 @@ BENCH_CONFIG_YAML=src/configuration-layer/config.jetson.yaml python3 benchmark.p
 The Jetson config (`config.jetson.yaml`) differs from the default in three ways:
 1. `config_device: cuda` — YOLO runs on GPU via TRT FP16 engine
 2. `config_vlm_device: cpu` — VLM runs on CPU (GPU memory is reserved for YOLO)
-3. `config_yolo_model: yolov11v28_jingtao.engine` — pre-built TRT engine
+3. `config_yolo_model: yolo11n_6class_finetuned.engine` — pre-built TRT engine
 
 ## Config Notes
 

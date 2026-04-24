@@ -39,7 +39,7 @@ config_vlm_api_key_env: GEMINI_API_KEY
 # VLM weights (1.7 GB), leaving no room for YOLO conv activations.
 # YOLO is latency-critical (every frame) so it keeps GPU.
 # VLM is async (background worker) so CPU latency is acceptable.
-config_vlm_device: cuda
+config_vlm_device: cpu
 config_vlm_crop_feedback_enabled: false
 config_vlm_crop_cache_size: 4
 config_vlm_dead_after_lost_frames: 30

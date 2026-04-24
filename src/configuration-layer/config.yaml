@@ -1,5 +1,5 @@
-# Values aligned for reading; YAML forbids tabs after ':' — spaces used to line up notes.
-# Legend: options = allowed values; caveat = known weak or misleading behavior.
+# Values aligned for reading; YAML forbids tabs after ':' so spaces are used for alignment.
+# Legend: options = allowed values; note = behavior for this checked-in profile.
 
 config_device: cuda                                              # options: cpu | cuda
 config_input_source: video                                      # options: camera | video
@@ -9,15 +9,15 @@ config_frame_resolution:                                       # [width, height]
   - 360
 config_roi_enabled: true                                        # options: true | false
 config_roi_vehicle_count_threshold: 20                          # int > 0; boxes counted toward ROI lock
-config_yolo_model: yolo11n_6class_finetuned.engine               # ultralytics .pt name/path (speed vs accuracy)
+config_yolo_model: yolo11n_6class_finetuned.engine               # detector checkpoint name/path (.pt or .engine)
 config_yolo_confidence_threshold: 0.4                            # float [0.0, 1.0]; higher = stricter boxes
 config_yolo_imgsz:                                               # [H, W] for non-square TRT engines; null = model default (640)
 config_vlm_enabled: true                                         # options: true | false
-config_vlm_backend: smolvlm_256m                                 # options: auto | huggingface_local | smolvlm_256m | qwen_0_8b | gemma_e2b_local
-config_vlm_model: src/vlm-layer/SmolVLM-256M-Instruct           # local VLM dir path; required if vlm enabled
+config_vlm_backend: smolvlm_256m                                 # options: auto | huggingface_local | smolvlm_256m | qwen_0_8b | gemma_e2b_local | gemini_e2b
+config_vlm_model: src/vlm-layer/SmolVLM-256M-Instruct            # local VLM dir path; repo-relative paths are resolved by helper scripts
 config_vlm_api_key_env: GEMINI_API_KEY                           # reserved; not used by current local backends
 config_vlm_device: cuda                                          # overrides config_device for VLM only; empty = inherit config_device
-config_vlm_crop_feedback_enabled: false                          # options: true | false | caveat: unstable — keep false
+config_vlm_crop_feedback_enabled: false                          # options: true | false; this profile runs single-shot VLM
 config_vlm_crop_cache_size: 4                                    # int > 0; rolling crops per track before dispatch
 config_vlm_dead_after_lost_frames: 30                            # int > 0; lost streak before track marked dead
 config_vlm_runtime_mode: async                                   # options: inline | async | spill (see # below)
@@ -38,13 +38,13 @@ config_evaluation_output_enabled: false                          # options: true
 # config_frame_resolution — Width and height in pixels for frames delivered to downstream layers.
 # config_roi_enabled — Enables the ROI layer so YOLO can run on a cropped region after lock.
 # config_roi_vehicle_count_threshold — Number of vehicle detections required before ROI is allowed to lock.
-# config_yolo_model — Ultralytics detector checkpoint file name or path controlling model size and classes.
+# config_yolo_model — Detector checkpoint file name or path controlling model size and classes.
 # config_yolo_confidence_threshold — Minimum detector confidence to keep a detection box.
 # config_vlm_enabled — Turns on VLM model load and semantic inference on vehicle crops.
 # config_vlm_backend — Selects the VLM backend family; `auto` infers from the configured model path.
-# config_vlm_model — Directory path containing the Hugging Face–style VLM weights and config.
+# config_vlm_model — Directory path containing the local VLM weights and config.
 # config_vlm_api_key_env — Reserved for future remote backends; ignored by current local backends.
-# config_vlm_crop_feedback_enabled — If true, uses VLM ack/retry to refine crops; currently unreliable—leave false.
+# config_vlm_crop_feedback_enabled — If true, uses VLM ack/retry to refine crops; false keeps this profile single-shot.
 # config_vlm_crop_cache_size — How many recent scored crops per track are retained for best-crop selection.
 # config_vlm_dead_after_lost_frames — Consecutive tracker “lost” updates before the cropper treats the track as dead.
 # config_vlm_runtime_mode — inline runs VLM in the frame loop; async uses a worker thread; spill writes overflow to disk.
