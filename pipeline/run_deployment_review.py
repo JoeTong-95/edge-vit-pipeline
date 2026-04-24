@@ -208,7 +208,16 @@ def _drain_async_result(
     ack = result["ack"]
     register_vlm_ack_package(crop_cache, ack)
     raw_result = result.get("raw_result")
-    vlm_output = build_vlm_output_json(raw_result, include_raw_result=include_raw_vlm)
+    if raw_result is None:
+        vlm_output = _build_async_error_vlm_output(
+            track_id=track_id,
+            query_type=str(result.get("query_type") or ""),
+            ack=ack,
+            error_text=str(result.get("error_text") or ""),
+            include_raw_vlm=include_raw_vlm,
+        )
+    else:
+        vlm_output = build_vlm_output_json(raw_result, include_raw_result=include_raw_vlm)
     normalized = vlm_output.get("normalized_result", {})
 
     raw_event = {
@@ -288,6 +297,70 @@ def _drain_async_result(
         },
     )
     return (1, 1)
+
+
+def _build_async_error_vlm_output(
+    *,
+    track_id: str,
+    query_type: str,
+    ack: Any,
+    error_text: str,
+    include_raw_vlm: bool,
+) -> dict[str, Any]:
+    retry_reasons = ["worker_error"] if error_text else []
+    payload = {
+        "vlm_layer_output_type": "vlm_output_json_v1",
+        "vlm_layer_track_id": track_id,
+        "vlm_layer_query_type": query_type,
+        "vlm_layer_model_id": "",
+        "normalized_result": {
+            "is_truck": False,
+            "wheel_count": 0,
+            "estimated_weight_kg": 0,
+            "vlm_layer_label": "no",
+            "vlm_layer_confidence": None,
+            "vlm_ack_status": str(getattr(ack, "vlm_ack_status", "")),
+            "vlm_retry_reasons": retry_reasons,
+            "vlm_layer_attributes": {
+                "is_truck": False,
+                "wheel_count": 0,
+                "estimated_weight_kg": 0,
+                "vlm_ack_status": str(getattr(ack, "vlm_ack_status", "")),
+                "vlm_retry_reasons": retry_reasons,
+                "raw_text": error_text,
+            },
+        },
+        "vlm_layer_package": {
+            "vlm_layer_track_id": track_id,
+            "vlm_layer_query_type": query_type,
+            "vlm_layer_label": "no",
+            "vlm_layer_attributes": {
+                "is_truck": False,
+                "wheel_count": 0,
+                "estimated_weight_kg": 0,
+                "vlm_ack_status": str(getattr(ack, "vlm_ack_status", "")),
+                "vlm_retry_reasons": retry_reasons,
+                "raw_text": error_text,
+            },
+            "vlm_layer_confidence": None,
+            "vlm_layer_model_id": "",
+        },
+        "vlm_ack_package": {
+            "vlm_ack_track_id": str(getattr(ack, "vlm_ack_track_id", track_id)),
+            "vlm_ack_status": str(getattr(ack, "vlm_ack_status", "")),
+            "vlm_ack_reason": str(getattr(ack, "vlm_ack_reason", "")),
+            "vlm_ack_retry_requested": bool(getattr(ack, "vlm_ack_retry_requested", False)),
+        },
+    }
+    if include_raw_vlm:
+        payload["vlm_raw_result"] = {
+            "vlm_layer_track_id": track_id,
+            "vlm_layer_query_type": query_type,
+            "vlm_layer_model_id": "",
+            "vlm_layer_raw_text": error_text,
+            "vlm_layer_raw_response": {"async_error": True},
+        }
+    return payload
 
 
 def main() -> None:
