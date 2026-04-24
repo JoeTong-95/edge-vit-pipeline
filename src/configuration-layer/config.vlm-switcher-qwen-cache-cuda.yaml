@@ -1,0 +1,31 @@
+# Config-driven switcher validation config: Qwen cache snapshot on CUDA.
+
+config_device: cuda
+config_input_source: video
+config_input_path: data/upson1.mp4
+config_frame_resolution:
+  - 640
+  - 360
+config_roi_enabled: true
+config_roi_vehicle_count_threshold: 3
+config_yolo_model: yolo11n_6class_finetuned.engine
+config_yolo_confidence_threshold: 0.4
+config_yolo_imgsz:
+config_vlm_enabled: true
+config_vlm_backend: qwen_0_8b
+config_vlm_model: /home/jetson/.cache/huggingface/hub/models--Qwen--Qwen3.5-0.8B/snapshots/2fc06364715b967f1860aea9cf38778875588b17
+config_vlm_api_key_env: GEMINI_API_KEY
+config_vlm_device: cuda
+config_vlm_crop_feedback_enabled: false
+config_vlm_crop_cache_size: 4
+config_vlm_dead_after_lost_frames: 30
+config_vlm_runtime_mode: async
+config_vlm_worker_max_queue_size: 64
+config_vlm_worker_batch_size: 1
+config_vlm_worker_batch_wait_ms: 50
+config_vlm_worker_spill_queue_path: data/vlm_spill_queue.jsonl
+config_vlm_spill_max_file_mb: 512
+config_vlm_realtime_throttle_enabled: true
+config_scene_awareness_enabled: false
+config_metadata_output_enabled: true
+config_evaluation_output_enabled: false

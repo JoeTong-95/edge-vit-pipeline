@@ -58,6 +58,7 @@ for p in (
 
 
 TARGET_CLASSES = {"pickup", "van", "truck", "bus"}
+ASYNC_DRAIN_NO_PROGRESS_TIMEOUT_SEC = 600.0
 
 
 NEW_TRACK_COLUMNS = [
@@ -742,8 +743,9 @@ def main() -> None:
 
             frames_done += 1
         if vlm_worker is not None:
-            deadline = time.time() + 300.0
-            while time.time() < deadline:
+            last_progress_at = time.time()
+            last_completed_count = -1
+            while True:
                 drained_any = False
                 for result in vlm_worker.drain_results():
                     drained_any = True
@@ -762,11 +764,22 @@ def main() -> None:
                     vlm_dispatches_saved += dispatch_saved_delta
                     vlm_results_logged += results_logged_delta
                 status = vlm_worker.get_status()
+                completed_count = int(status.get("completed_count") or 0)
+                if drained_any or completed_count != last_completed_count:
+                    last_progress_at = time.time()
+                    last_completed_count = completed_count
                 if not pending_dispatches and status["queue_size"] == 0 and not status["busy"]:
+                    break
+                if time.time() - last_progress_at > ASYNC_DRAIN_NO_PROGRESS_TIMEOUT_SEC:
+                    print(
+                        "[review-run] async drain timeout "
+                        f"after {ASYNC_DRAIN_NO_PROGRESS_TIMEOUT_SEC:.0f}s without progress; "
+                        "continuing to shutdown with pending work"
+                    )
                     break
                 if not drained_any:
                     time.sleep(0.02)
-            vlm_worker.shutdown()
+            vlm_worker.shutdown(join_timeout=30.0)
 
     input_layer.close_input_layer()
 

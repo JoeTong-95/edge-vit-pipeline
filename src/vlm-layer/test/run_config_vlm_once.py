@@ -69,8 +69,8 @@ def _resolve_vlm_model_path(config_value: str) -> str:
     return str((_REPO_ROOT / raw).resolve())
 
 
-def load_runtime_settings() -> dict[str, Any]:
-    config_path = _CONFIG_DIR / "config.yaml"
+def load_runtime_settings(config_path: Path | None = None) -> dict[str, Any]:
+    config_path = config_path or (_CONFIG_DIR / "config.yaml")
     config = load_config(config_path)
     validate_config(config)
     return {
@@ -80,7 +80,9 @@ def load_runtime_settings() -> dict[str, Any]:
         "yolo_model": get_config_value(config, "config_yolo_model"),
         "yolo_confidence_threshold": get_config_value(config, "config_yolo_confidence_threshold"),
         "device": get_config_value(config, "config_device"),
+        "vlm_device": str(get_config_value(config, "config_vlm_device") or "").strip(),
         "vlm_enabled": bool(get_config_value(config, "config_vlm_enabled")),
+        "vlm_backend": str(get_config_value(config, "config_vlm_backend")),
         "vlm_model": _resolve_vlm_model_path(get_config_value(config, "config_vlm_model")),
         "vlm_crop_feedback_enabled": bool(get_config_value(config, "config_vlm_crop_feedback_enabled")),
         "vlm_crop_cache_size": int(get_config_value(config, "config_vlm_crop_cache_size")),
@@ -119,6 +121,12 @@ def tracking_rows(tracking_pkg: dict[str, Any]) -> list[dict[str, Any]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the real config-driven VLM pipeline and save actual VLM debug images.")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=_CONFIG_DIR / "config.yaml",
+        help="Path to configuration YAML (default: src/configuration-layer/config.yaml).",
+    )
     parser.add_argument("--max-frames", type=int, default=5000, help="Maximum number of frames to scan before giving up.")
     parser.add_argument("--target-ids", type=int, default=15, help="Number of unique VLM-dispatched track IDs to capture.")
     parser.add_argument("--camera-index", type=int, default=0)
@@ -128,12 +136,13 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_VLM_DEBUG_OUTPUT_DIR)
     args = parser.parse_args()
 
-    settings = load_runtime_settings()
+    config_path = args.config.expanduser().resolve()
+    settings = load_runtime_settings(config_path=config_path)
     if not settings["vlm_enabled"]:
         raise RuntimeError("config_vlm_enabled is false in config.yaml, so the VLM path is disabled.")
 
     runtime_device = args.device_override.strip() or settings["device"]
-    runtime_vlm_device = args.vlm_device_override.strip() or runtime_device
+    runtime_vlm_device = args.vlm_device_override.strip() or settings["vlm_device"] or runtime_device
 
     input_layer = InputLayer()
     input_layer.initialize_input_layer(
@@ -156,6 +165,7 @@ def main() -> None:
     vlm_state = initialize_vlm_layer(
         VLMConfig(
             config_vlm_enabled=True,
+            config_vlm_backend=settings["vlm_backend"],
             config_vlm_model=settings["vlm_model"],
             config_device=runtime_vlm_device,
         )
