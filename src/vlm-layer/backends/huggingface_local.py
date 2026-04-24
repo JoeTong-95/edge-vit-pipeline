@@ -65,8 +65,14 @@ def initialize_backend(
         model_class = _load_model_class(transformers)
         model = model_class.from_pretrained(resolved_model_path, **load_kwargs)
     except (ImportError, RuntimeError) as exc:
-        if load_kwargs.get("device_map") == "auto":
-            # Some environments lack accelerate/device_map support; retry without it.
+        _raise_if_jetson_cuda_runtime_failure(
+            exc=exc,
+            runtime_device=runtime_device,
+            model_id=resolved_model_path.name,
+            stage="load_model",
+        )
+        if load_kwargs.get("device_map") == "auto" and _should_retry_without_device_map(exc):
+            # Retry only when accelerate/device_map support is missing.
             load_kwargs.pop("device_map", None)
             model = model_class.from_pretrained(resolved_model_path, **load_kwargs)
         else:
@@ -76,7 +82,16 @@ def initialize_backend(
         raise
 
     if not hasattr(model, "hf_device_map"):
-        model = model.to(runtime_device)
+        try:
+            model = model.to(runtime_device)
+        except RuntimeError as exc:
+            _raise_if_jetson_cuda_move_failure(
+                exc=exc,
+                model_path=resolved_model_path,
+                runtime_device=runtime_device,
+                runtime_dtype=runtime_dtype,
+            )
+            raise
     model.eval()
 
     return {
@@ -110,12 +125,21 @@ def infer_single(
     )
     torch = backend_state["torch"]
     model = backend_state["model"]
-    with torch.inference_mode():
-        generated_ids = model.generate(
-            **inputs,
-            max_new_tokens=24,
-            do_sample=False,
+    try:
+        with torch.inference_mode():
+            generated_ids = model.generate(
+                **inputs,
+                max_new_tokens=24,
+                do_sample=False,
+            )
+    except RuntimeError as exc:
+        _raise_if_jetson_cuda_runtime_failure(
+            exc=exc,
+            runtime_device=str(backend_state["runtime_device"]),
+            model_id=str(backend_state.get("model_id", "unknown")),
+            stage="generate",
         )
+        raise
 
     prompt_tokens = int(inputs["input_ids"].shape[1])
     new_token_ids = generated_ids[:, prompt_tokens:]
@@ -154,12 +178,21 @@ def infer_batch(
     )
     torch = backend_state["torch"]
     model = backend_state["model"]
-    with torch.inference_mode():
-        generated_ids = model.generate(
-            **inputs,
-            max_new_tokens=24,
-            do_sample=False,
+    try:
+        with torch.inference_mode():
+            generated_ids = model.generate(
+                **inputs,
+                max_new_tokens=24,
+                do_sample=False,
+            )
+    except RuntimeError as exc:
+        _raise_if_jetson_cuda_runtime_failure(
+            exc=exc,
+            runtime_device=str(backend_state["runtime_device"]),
+            model_id=str(backend_state.get("model_id", "unknown")),
+            stage="generate_batch",
         )
+        raise
 
     input_ids = inputs.get("input_ids")
     if input_ids is None:
@@ -316,3 +349,73 @@ def _move_inputs_to_device(inputs: dict[str, Any], device: str) -> dict[str, Any
     for key, value in inputs.items():
         moved_inputs[key] = value.to(device) if hasattr(value, "to") else value
     return moved_inputs
+
+
+def _should_retry_without_device_map(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    return any(
+        hint in message
+        for hint in (
+            "accelerate",
+            "device_map",
+            "dispatch_model",
+            "requires accelerate",
+        )
+    )
+
+
+def _raise_if_jetson_cuda_move_failure(
+    *,
+    exc: BaseException,
+    model_path: Path,
+    runtime_device: str,
+    runtime_dtype: Any,
+) -> None:
+    if runtime_device != "cuda":
+        return
+
+    message = str(exc)
+    lowered = message.lower()
+    if "cudacachingallocator" not in lowered and "nvml_success == r" not in lowered:
+        return
+
+    raise RuntimeError(
+        "Moving this Hugging Face VLM checkpoint onto CUDA failed during full-model placement. "
+        f"model={model_path.name} dtype={runtime_dtype}. "
+        "On this Jetson, that usually means the model cannot be placed fully on GPU memory with the "
+        "current loader path. The previous automatic retry without device_map can hide the original "
+        "failure and lead to a harder allocator crash, so the backend now stops here and reports the "
+        "CUDA placement failure directly."
+    ) from exc
+
+
+def _raise_if_jetson_cuda_runtime_failure(
+    *,
+    exc: BaseException,
+    runtime_device: str,
+    model_id: str,
+    stage: str,
+) -> None:
+    if runtime_device != "cuda":
+        return
+
+    message = str(exc)
+    lowered = message.lower()
+    if not any(
+        hint in lowered
+        for hint in (
+            "cudacachingallocator",
+            "nvml_success == r",
+            "cublas_status_execution_failed",
+            "cuda error",
+        )
+    ):
+        return
+
+    raise RuntimeError(
+        "CUDA inference failed for this Hugging Face VLM on Jetson during "
+        f"{stage}. model={model_id}. "
+        "The switcher is selecting the configured CUDA path, but this backend/device combination is "
+        "not completing bounded inference on the current machine. Treat this as a real CUDA runtime "
+        "capacity/stability failure rather than a switcher-resolution bug."
+    ) from exc

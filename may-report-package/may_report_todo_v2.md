@@ -358,6 +358,100 @@ Implementation note:
       - `gemma_e2b_local` on `cpu`
     - excludes the currently non-realistic / host-risky paths from the first-pass plan
   - this selection workflow was validated end-to-end through `pipeline/build_report_summary.py`
+- switcher-validation work is now partially implemented for the remaining blocker:
+  - staged execution plan is now recorded in:
+    - `may-report-package/vlm_switcher_validation_plan_2026-04-24.md`
+  - added `pipeline/validate_vlm_switcher.py`
+  - purpose:
+    - validate config-driven backend/device/runtime resolution
+    - confirm checkpoint readiness
+    - avoid launching inference during the first Jetson-risk review pass
+  - safe validation results from this cycle:
+    - `config.report-baseline.yaml`:
+      - backend `smolvlm_256m`
+      - VLM device `cpu`
+      - runtime `async`
+    - `config.yaml`:
+      - backend `smolvlm_256m`
+      - VLM device `cuda`
+      - runtime `async`
+    - `config.jetson.yaml`:
+      - backend `smolvlm_256m`
+      - VLM device `cuda`
+      - runtime `async`
+    - `config.cpu-test.yaml`:
+      - VLM disabled as expected
+  - current conclusion:
+    - switcher config resolution is now validated for every in-repo YAML
+    - bounded live validation has now also completed for:
+      - `smolvlm_256m` on `cpu` via `config.report-baseline.yaml`
+      - `smolvlm_256m` on `cuda` via `config.jetson.yaml`
+    - later current-branch rechecks also passed again for both device paths:
+      - one-shot recheck artifacts:
+        - `review-package/artifacts/vlm_switcher_validation_20260424_cpu_recheck/`
+        - `review-package/artifacts/vlm_switcher_validation_20260424_cuda_recheck/`
+      - larger bounded helper-workload artifacts:
+        - `review-package/artifacts/vlm_switcher_validation_20260424_cpu_two_targets/`
+        - `review-package/artifacts/vlm_switcher_validation_20260424_cuda_two_targets/`
+    - current remaining blocker is no longer the `smolvlm_256m` switcher path itself
+    - the remaining unvalidated area is:
+      - other backend families
+      - longer-duration runtime stability beyond one-shot bounded validation
+      - full report-stage `YOLO cuda + VLM cuda` review-package stability
+    - later matrix recheck for the non-Smol backends refined that remaining area:
+      - `qwen_0_8b`
+        - repo-local path is still broken by Git LFS pointer files
+        - the hydrated cache snapshot also is not directly runnable in the current setup because it lacks a usable `config.json`
+        - a local repaired directory now exists at:
+          - `src/vlm-layer/Qwen3.5-0.8B-local-hydrated`
+        - bounded CPU validation now passes through:
+          - `src/configuration-layer/config.vlm-switcher-qwen-hydrated-cpu.yaml`
+          - `review-package/artifacts/vlm_switcher_qwen_hydrated_cpu_20260424/`
+        - bounded CUDA validation now gets past packaging/model load but still fails on Jetson CUDA runtime capacity/stability:
+          - `src/configuration-layer/config.vlm-switcher-qwen-hydrated-cuda.yaml`
+          - `review-package/artifacts/vlm_switcher_qwen_hydrated_cuda_20260424/`
+          - `review-package/artifacts/vlm_switcher_qwen_hydrated_cuda_20260424_recheck_final/`
+          - failure:
+            - repo-classified Jetson CUDA runtime-capacity/stability failure during model load / bounded inference
+        - the repo-local Qwen path is still broken, but the remaining CUDA issue is now narrowed to runtime/device execution rather than checkpoint packaging or switcher resolution
+      - `gemma_e2b_local`
+        - `cpu` switching is now confirmed after fixing the one-shot helper to honor `config_vlm_device`
+        - the `cpu` path still fails at inference time with `RemoteProtocolError`
+        - the `cuda` path switches correctly but fails at startup with GPU OOM
+        - keep the working explanation in mind and stop spending report time here unless priorities change:
+          - the GGUF file size is not the full live CUDA memory footprint
+          - Jetson `8 GB` is shared unified memory, not empty dedicated VRAM
+          - the active run also includes YOLO/TensorRT, `mmproj`, llama.cpp scratch buffers, and process overhead
+          - latest rerun still failed while asking CUDA for another about `436.99 MiB`
+      - practical reading:
+        - `smolvlm_256m` is still the only backend currently shown to switch successfully across both `cpu` and `cuda` on this Jetson
+        - `qwen_0_8b` now has a passing bounded CPU path after local checkpoint hydration
+        - next Qwen-specific task is no longer basic packaging; it is reducing Jetson CUDA runtime pressure or changing the CUDA load strategy for the hydrated checkpoint
+        - next practical optimization path should stay focused on `smolvlm_256m`, not Gemma CUDA
+          - likely best next levers:
+            - keep the stable review baseline as `YOLO cuda + SmolVLM cpu + async`
+            - use `smolvlm_256m` on `cuda` only for bounded helper/perf experiments where it already passes
+            - tune async queueing and batching first:
+              - `config_vlm_worker_batch_size`
+              - `config_vlm_worker_batch_wait_ms`
+              - spill/deferred queue processing for backlog-heavy clips
+            - if we revisit model optimization later, prefer a matched smaller/quantized Smol path before reopening Gemma CUDA
+  - refreshed package-generation follow-up in this cycle:
+    - identified and patched an async teardown issue in:
+      - `pipeline/run_deployment_review.py`
+      - `src/vlm-layer/util/visualize_vlm_realtime.py`
+    - previous failure mode:
+      - long async drain runs could hit the old fixed `300s` drain deadline
+      - the runner could print a normal run summary and still abort during worker teardown with:
+        - `terminate called without an active exception`
+    - current fix:
+      - async drain now waits on real progress instead of a short fixed wall-clock timeout
+      - worker shutdown now sends a sentinel first and waits more gracefully for thread exit
+    - refreshed post-fix baseline review packages now exist:
+      - `review-package/runs/20260424_035055_upson1_may_baseline_day_asyncfix_retry/`
+      - `review-package/runs/20260424_035748_sample1_may_baseline_night_asyncfix_retry/`
+    - both refreshed runs report:
+      - `vlm_runtime_mode_effective: async`
   - `pipeline/build_report_summary.py` now also treats dry-run plans as first-class outputs:
     - counts `planned_cases`
     - carries `selection_reason` into report artifacts
@@ -384,14 +478,33 @@ Implementation note:
     - review queue completion now depends on classification labels instead of any label at all
     - review-app ingestion now purges stale out-of-scope VLM review items from `human_truth.sqlite`
     - truth-comparison output now clearly labels current class agreement as a detector-class proxy
-  - remaining open gap:
+  - remaining open gaps:
+    - multi-config review-package generation still depends on a stable VLM switcher path
     - baseline day/night runs still need real human labeling volume before the report can claim meaningful truth coverage
 
 Immediate next repo-visible follow-up:
 
+- before touching the VLM switcher again, re-read the existing Jetson host-risk notes in:
+  - `may-report-package/may_report_todo_v2.md`
+  - `may-report-package/review_package_spec.md`
+- important caution:
+  - previous sessions that tried to smoke-run the unstable VLM switcher path were associated with SSH connection loss / temporary host disappearance
+  - treat risky switcher reruns as explicit operator-confirmed actions rather than default exploratory validation
+- validate the VLM switcher end-to-end for the specific backend/device/runtime combinations that should generate review packages
+- current status:
+  - bounded end-to-end switcher validation is complete for the currently tested `smolvlm_256m` helper paths on both `cpu` and `cuda`
+  - the helper-path result is stronger now because it was rechecked again on the current branch and extended to a `2`-target bounded workload on both devices
+  - refreshed baseline day/night review packages now exist for the patched async-aware runner
 - use the now-correct async-aware review runner for any future baseline reruns so new artifacts match the locked config on disk
-- if a fresh full baseline rerun is needed for report purity, rerun the day/night pair with the patched `pipeline/run_deployment_review.py`
-- only after that optional refresh should further one-by-one backend/device checks resume
+- if report assembly continues from the refreshed baseline pair, use:
+  - `review-package/runs/20260424_035055_upson1_may_baseline_day_asyncfix_retry/`
+  - `review-package/runs/20260424_035748_sample1_may_baseline_night_asyncfix_retry/`
+- keep the locked May-report baseline on:
+  - YOLO `cuda`
+  - `smolvlm_256m` VLM `cpu`
+  - runtime `async`
+- do not reinterpret the bounded helper-path `cuda` recheck as proof that the full review-package `YOLO cuda + VLM cuda` path is report-stable on this Jetson
+- only after that switcher validation should further config-specific review-package generation resume
 - consolidated final-report-table work is now partially implemented:
   - `pipeline/build_may_report_tables.py`
     - aggregates current baseline-pair planning artifacts

@@ -102,13 +102,22 @@ class AsyncVLMWorker:
     def start(self) -> None:
         self.thread.start()
 
-    def shutdown(self) -> None:
-        self.stop_event.set()
-        try:
-            self.task_queue.put_nowait(None)
-        except queue.Full:
-            pass
-        self.thread.join(timeout=2.0)
+    def shutdown(self, join_timeout: float | None = 30.0) -> None:
+        if not self.thread.is_alive():
+            return
+
+        inserted_sentinel = False
+        while self.thread.is_alive() and not inserted_sentinel:
+            try:
+                self.task_queue.put(None, timeout=0.1)
+                inserted_sentinel = True
+            except queue.Full:
+                continue
+
+        self.thread.join(timeout=join_timeout)
+        if self.thread.is_alive():
+            self.stop_event.set()
+            self.thread.join(timeout=2.0)
 
     def submit(self, task: dict[str, Any]) -> None:
         try:

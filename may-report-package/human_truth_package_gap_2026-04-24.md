@@ -43,6 +43,43 @@ But the implementation was not yet fully aligned with the report-package contrac
    - This is now the main remaining gap.
    - It cannot be completed by code alone.
 
+6. [ ] Multi-config review-package generation still depends on VLM switcher reliability.
+   - The human-truth package shape is now largely aligned with the report workflow.
+   - But generating review packages for multiple comparison configs still requires:
+     - config-driven VLM backend selection
+     - config-driven VLM device selection
+     - config-driven VLM runtime selection
+     - stable end-to-end review-package execution for those config combinations
+   - Important Jetson safety note:
+     - previous sessions that attempted to smoke-run the VLM switcher / unstable backend-device combinations were associated with SSH connection loss
+     - related docs should be re-read before touching that path:
+     - `may-report-package/may_report_todo_v2.md`
+     - `may-report-package/review_package_spec.md`
+     - any future risky switcher rerun should be treated as an explicit operator-confirmed action, not something to launch casually during an exploratory coding pass
+   - Safe validation completed in this cycle:
+     - added `pipeline/validate_vlm_switcher.py`
+     - rechecked all in-repo YAML configs without launching inference
+     - `config.report-baseline.yaml` resolves to:
+       - backend `smolvlm_256m`
+       - device `cpu`
+       - runtime `async`
+     - `config.yaml` resolves to:
+       - backend `smolvlm_256m`
+       - device `cuda`
+       - runtime `async`
+     - `config.jetson.yaml` resolves to:
+       - backend `smolvlm_256m`
+       - device `cuda`
+       - runtime `async`
+     - `config.cpu-test.yaml` correctly resolves as VLM-disabled
+   - Current conclusion:
+     - config parsing and backend/device/runtime resolution are now validated
+     - bounded helper-path live validation for `smolvlm_256m` has passed on both `cpu` and `cuda`
+     - the remaining switcher risk is live inference stability on selected backend/device combinations in the full review-package path
+   - Current practical reading:
+     - the `smolvlm_256m` switcher itself is revalidated for bounded helper workloads on `cpu` and `cuda`
+     - the already-proven May-report package-generation baseline should still remain the `cpu` VLM path until full `YOLO cuda + VLM cuda` review runs are shown stable
+
 ## Fixes Completed In This Cycle
 
 1. Review-app ingestion now filters `vlm_accepted_target` rows to the report vehicle scope only.
@@ -56,7 +93,10 @@ But the implementation was not yet fully aligned with the report-package contrac
 
 ## Remaining Gap After This Fix Pass
 
-The package still needs real human labeling volume before it is report-ready.
+Two real gaps remain before the full report workflow is complete:
+
+1. VLM switcher validation for config-specific review-package generation.
+2. Real human labeling volume on the generated day/night review packages.
 
 At the time of review:
 
@@ -64,4 +104,7 @@ At the time of review:
 - `review_labels`: sparse
 - `review_highlights`: sparse
 
-So the workflow shape is present, but the baseline day/night runs still need to be reviewed by a human operator to produce meaningful report metrics.
+So the workflow shape is present, but:
+
+- multi-config package generation still depends on a stable VLM switcher path
+- generated review packages still need to be reviewed by a human operator to produce meaningful report metrics
