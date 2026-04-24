@@ -40,6 +40,7 @@ TRACKING_DIR = SRC_DIR / "tracking-layer"
 VSTATE_DIR = SRC_DIR / "vehicle-state-layer"
 VLM_DIR = SRC_DIR / "vlm-layer"
 CROPPER_DIR = SRC_DIR / "vlm-frame-cropper-layer"
+VLM_UTIL_DIR = VLM_DIR / "util"
 
 for p in (
     CONFIG_DIR,
@@ -50,6 +51,7 @@ for p in (
     VSTATE_DIR,
     VLM_DIR,
     CROPPER_DIR,
+    VLM_UTIL_DIR,
 ):
     if p.exists():
         sys.path.insert(0, str(p))
@@ -177,6 +179,116 @@ def _serialize_config_snapshot(cfg: Any) -> dict[str, Any]:
     return {"raw_repr": repr(cfg)}
 
 
+def _drain_async_result(
+    *,
+    result: dict[str, Any],
+    pending_dispatches: dict[str, list[dict[str, Any]]],
+    crop_cache: Any,
+    accepted_writer: csv.DictWriter,
+    events_f: Any,
+    raw_events_dir: Path,
+    review_root: Path,
+    run_id: str,
+    source_video: str,
+    include_raw_vlm: bool,
+) -> tuple[int, int]:
+    from layer import build_vlm_output_json
+    from vlm_frame_cropper_layer import register_vlm_ack_package
+
+    track_id = str(result.get("track_id") or "")
+    queue = pending_dispatches.get(track_id) or []
+    if not queue:
+        return (0, 0)
+
+    context = queue.pop(0)
+    if not queue:
+        pending_dispatches.pop(track_id, None)
+
+    ack = result["ack"]
+    register_vlm_ack_package(crop_cache, ack)
+    raw_result = result.get("raw_result")
+    vlm_output = build_vlm_output_json(raw_result, include_raw_result=include_raw_vlm)
+    normalized = vlm_output.get("normalized_result", {})
+
+    raw_event = {
+        "schema": "review_dispatch_event_v1",
+        "run_id": run_id,
+        "source_video": source_video,
+        "frame_index": context["frame_index"],
+        "track_id": track_id,
+        "dispatch": context["dispatch_payload"],
+        "prompt_text": result.get("prompt", ""),
+        "vlm": vlm_output,
+        "worker_runtime_sec": result.get("runtime_sec"),
+        "worker_error_text": result.get("error_text", ""),
+        "timestamp_utc": _utc_now_iso(),
+    }
+    raw_event_path = raw_events_dir / f"dispatch_{context['dispatch_index']:06d}.json"
+    raw_event_path.write_text(json.dumps(raw_event, indent=2), encoding="utf-8")
+    raw_event_relpath = _to_relpath(raw_event_path, review_root)
+
+    accepted_row = {
+        "run_id": run_id,
+        "source_video": source_video,
+        "frame_index": context["frame_index"],
+        "track_id": track_id,
+        "target_class": context["target_class"],
+        "bbox_x1": int(context["bbox"][0]),
+        "bbox_y1": int(context["bbox"][1]),
+        "bbox_x2": int(context["bbox"][2]),
+        "bbox_y2": int(context["bbox"][3]),
+        "tracker_confidence": context["tracker_confidence"],
+        "dispatch_mode": str(context["dispatch_payload"].get("vlm_dispatch_mode") or ""),
+        "dispatch_reason": str(context["dispatch_payload"].get("vlm_dispatch_reason") or ""),
+        "dispatch_cached_crop_count": int(context["dispatch_payload"].get("vlm_dispatch_cached_crop_count") or 0),
+        "from_cache": True,
+        "model_id": str(vlm_output.get("vlm_layer_model_id") or ""),
+        "query_type": str(vlm_output.get("vlm_layer_query_type") or ""),
+        "is_type": bool(normalized.get("is_truck")),
+        "ack_status": str(normalized.get("vlm_ack_status") or ""),
+        "retry_reasons": json.dumps(list(normalized.get("vlm_retry_reasons") or [])),
+        "image_relpath": context["image_relpath"],
+        "raw_event_relpath": raw_event_relpath,
+    }
+    accepted_writer.writerow(accepted_row)
+
+    _append_jsonl(
+        events_f,
+        {
+            "event_type": "vlm_dispatch_saved",
+            "timestamp_utc": _utc_now_iso(),
+            "run_id": run_id,
+            "source_video": source_video,
+            "frame_index": context["frame_index"],
+            "track_id": track_id,
+            "payload": {
+                "image_relpath": context["image_relpath"],
+                "raw_event_relpath": raw_event_relpath,
+                "dispatch_mode": context["dispatch_payload"].get("vlm_dispatch_mode"),
+                "dispatch_reason": context["dispatch_payload"].get("vlm_dispatch_reason"),
+                "dispatch_cached_crop_count": context["dispatch_payload"].get("vlm_dispatch_cached_crop_count"),
+            },
+        },
+    )
+    _append_jsonl(
+        events_f,
+        {
+            "event_type": "vlm_result_logged",
+            "timestamp_utc": _utc_now_iso(),
+            "run_id": run_id,
+            "source_video": source_video,
+            "frame_index": context["frame_index"],
+            "track_id": track_id,
+            "payload": {
+                "is_type": bool(normalized.get("is_truck")),
+                "ack_status": str(normalized.get("vlm_ack_status") or ""),
+                "retry_reasons": list(normalized.get("vlm_retry_reasons") or []),
+            },
+        },
+    )
+    return (1, 1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate review-package artifacts from a headless pipeline run.")
     parser.add_argument("--max-frames", type=int, default=0, help="Stop after N frames (0 means until source ends).")
@@ -255,6 +367,15 @@ def main() -> None:
     vlm_api_key_env = str(get_config_value(cfg, "config_vlm_api_key_env"))
     vlm_crop_cache_size = int(get_config_value(cfg, "config_vlm_crop_cache_size"))
     vlm_dead_after_lost_frames = int(get_config_value(cfg, "config_vlm_dead_after_lost_frames"))
+    vlm_feedback_enabled = bool(get_config_value(cfg, "config_vlm_crop_feedback_enabled"))
+    vlm_runtime_mode_cfg = str(get_config_value(cfg, "config_vlm_runtime_mode") or "inline").strip().lower()
+    if vlm_runtime_mode_cfg not in ("inline", "async", "spill"):
+        vlm_runtime_mode_cfg = "inline"
+    vlm_worker_max_queue_size = int(get_config_value(cfg, "config_vlm_worker_max_queue_size"))
+    vlm_worker_batch_size = int(get_config_value(cfg, "config_vlm_worker_batch_size"))
+    vlm_worker_batch_wait_ms = int(get_config_value(cfg, "config_vlm_worker_batch_wait_ms"))
+    vlm_spill_queue_path_raw = str(get_config_value(cfg, "config_vlm_worker_spill_queue_path") or "").strip()
+    vlm_spill_max_mb = float(get_config_value(cfg, "config_vlm_spill_max_file_mb") or 0)
     _vlm_dev = str(get_config_value(cfg, "config_vlm_device") or "").strip()
     vlm_infer_device = _vlm_dev if _vlm_dev else device
 
@@ -309,6 +430,8 @@ def main() -> None:
     vlm_state = None
     crop_cache = None
     vlm_query_type = "vehicle_semantics_single_shot_v1"
+    vlm_worker = None
+    vlm_effective_runtime = vlm_runtime_mode_cfg if vlm_enabled else "inline"
     if vlm_enabled:
         try:
             vlm_state = initialize_vlm_layer(
@@ -325,15 +448,46 @@ def main() -> None:
                 config_vlm_dead_after_lost_frames=vlm_dead_after_lost_frames,
             )
             vlm_available = True
+            if vlm_runtime_mode_cfg in ("async", "spill"):
+                try:
+                    from visualize_vlm_realtime import AsyncVLMWorker
+
+                    spill_path = ""
+                    spill_max_file_bytes = 0
+                    if vlm_runtime_mode_cfg == "spill" and vlm_spill_queue_path_raw:
+                        spill_path = _resolve_repo_path(vlm_spill_queue_path_raw)
+                        spill_max_file_bytes = int(vlm_spill_max_mb * 1024 * 1024) if vlm_spill_max_mb > 0 else 0
+                    vlm_worker = AsyncVLMWorker(
+                        vlm_state=vlm_state,
+                        feedback_enabled=vlm_feedback_enabled,
+                        max_queue_size=vlm_worker_max_queue_size,
+                        batch_size=vlm_worker_batch_size,
+                        batch_wait_ms=vlm_worker_batch_wait_ms,
+                        spill_queue_path=spill_path,
+                        spill_max_file_bytes=spill_max_file_bytes,
+                    )
+                    vlm_worker.start()
+                except Exception as exc:
+                    print(
+                        f"[review-run] VLM worker init failed "
+                        f"({type(exc).__name__}: {exc}); falling back to inline."
+                    )
+                    vlm_worker = None
         except Exception as exc:
             print(f"[review-run] VLM unavailable ({type(exc).__name__}: {exc}); continuing without VLM.")
             vlm_available = False
+            vlm_worker = None
+
+    if vlm_enabled and vlm_available and vlm_runtime_mode_cfg in ("async", "spill") and vlm_worker is None:
+        vlm_effective_runtime = "inline"
 
     saved_new_track_ids: set[str] = set()
+    pending_dispatches: dict[str, list[dict[str, Any]]] = {}
     frames_done = 0
     new_tracks_saved = 0
     vlm_dispatches_saved = 0
     vlm_results_logged = 0
+    vlm_dispatch_counter = 0
     started_at = time.time()
 
     with (
@@ -472,6 +626,23 @@ def main() -> None:
                 )
 
             if vlm_enabled and vlm_available and crop_cache is not None and vlm_state is not None:
+                if vlm_effective_runtime in ("async", "spill") and vlm_worker is not None:
+                    for result in vlm_worker.drain_results():
+                        dispatch_saved_delta, results_logged_delta = _drain_async_result(
+                            result=result,
+                            pending_dispatches=pending_dispatches,
+                            crop_cache=crop_cache,
+                            accepted_writer=accepted_writer,
+                            events_f=events_f,
+                            raw_events_dir=raw_events_dir,
+                            review_root=review_root,
+                            run_id=run_id,
+                            source_video=source_video,
+                            include_raw_vlm=bool(args.include_raw_vlm),
+                        )
+                        vlm_dispatches_saved += dispatch_saved_delta
+                        vlm_results_logged += results_logged_delta
+
                 track_cache_keys = sorted(crop_cache["track_caches"].keys(), key=lambda x: (len(str(x)), str(x)))
                 for tid in track_cache_keys:
                     dispatch = build_vlm_dispatch_package(crop_cache, tid)
@@ -486,6 +657,8 @@ def main() -> None:
                     confidence = float(sent_pkg.get("confidence") or 0.0)
                     target_class = str(track_cache.get("detector_class") or "")
                     dispatch_frame_id = int(sent_pkg.get("frame_id") or frame_id)
+                    if target_class not in TARGET_CLASSES:
+                        continue
 
                     crop_img = inner["vlm_frame_cropper_layer_image"]
                     image_name = (
@@ -497,102 +670,103 @@ def main() -> None:
                     image_path = accepted_dir / image_name
                     cv2.imwrite(str(image_path), crop_img)
                     image_relpath = _to_relpath(image_path, review_root)
-
+                    vlm_dispatch_counter += 1
+                    dispatch_payload = {
+                        "vlm_dispatch_track_id": dispatch.get("vlm_dispatch_track_id"),
+                        "vlm_dispatch_mode": dispatch.get("vlm_dispatch_mode"),
+                        "vlm_dispatch_reason": dispatch.get("vlm_dispatch_reason"),
+                        "vlm_dispatch_cached_crop_count": dispatch.get("vlm_dispatch_cached_crop_count"),
+                    }
                     vlm_crop_pkg = VLMFrameCropperLayerPackage(
                         vlm_frame_cropper_layer_track_id=str(inner["vlm_frame_cropper_layer_track_id"]),
                         vlm_frame_cropper_layer_image=inner["vlm_frame_cropper_layer_image"],
                         vlm_frame_cropper_layer_bbox=tuple(int(x) for x in inner["vlm_frame_cropper_layer_bbox"]),
                     )
                     prompt_text = prepare_vlm_prompt(vlm_query_type, vlm_crop_pkg)
-                    raw_result = run_vlm_inference_batch(vlm_state, [vlm_crop_pkg], [vlm_query_type])[0]
-                    ack = build_vlm_ack_package_from_result(raw_result)
-                    register_vlm_ack_package(crop_cache, ack)
-                    vlm_output = build_vlm_output_json(raw_result, include_raw_result=bool(args.include_raw_vlm))
-                    normalized = vlm_output.get("normalized_result", {})
 
-                    raw_event = {
-                        "schema": "review_dispatch_event_v1",
-                        "run_id": run_id,
-                        "source_video": source_video,
-                        "frame_index": dispatch_frame_id,
-                        "track_id": str(inner["vlm_frame_cropper_layer_track_id"]),
-                        "dispatch": {
-                            "vlm_dispatch_track_id": dispatch.get("vlm_dispatch_track_id"),
-                            "vlm_dispatch_mode": dispatch.get("vlm_dispatch_mode"),
-                            "vlm_dispatch_reason": dispatch.get("vlm_dispatch_reason"),
-                            "vlm_dispatch_cached_crop_count": dispatch.get("vlm_dispatch_cached_crop_count"),
-                        },
-                        "prompt_text": prompt_text,
-                        "vlm": vlm_output,
-                        "timestamp_utc": _utc_now_iso(),
-                    }
-                    raw_event_path = raw_events_dir / f"dispatch_{vlm_dispatches_saved + 1:06d}.json"
-                    raw_event_path.write_text(json.dumps(raw_event, indent=2), encoding="utf-8")
-                    raw_event_relpath = _to_relpath(raw_event_path, review_root)
-
-                    accepted_row = {
-                        "run_id": run_id,
-                        "source_video": source_video,
-                        "frame_index": dispatch_frame_id,
-                        "track_id": str(inner["vlm_frame_cropper_layer_track_id"]),
-                        "target_class": target_class,
-                        "bbox_x1": int(bbox[0]),
-                        "bbox_y1": int(bbox[1]),
-                        "bbox_x2": int(bbox[2]),
-                        "bbox_y2": int(bbox[3]),
-                        "tracker_confidence": confidence,
-                        "dispatch_mode": str(dispatch.get("vlm_dispatch_mode") or ""),
-                        "dispatch_reason": str(dispatch.get("vlm_dispatch_reason") or ""),
-                        "dispatch_cached_crop_count": int(dispatch.get("vlm_dispatch_cached_crop_count") or 0),
-                        "from_cache": True,
-                        "model_id": str(vlm_output.get("vlm_layer_model_id") or ""),
-                        "query_type": str(vlm_output.get("vlm_layer_query_type") or ""),
-                        "is_type": bool(normalized.get("is_truck")),
-                        "ack_status": str(normalized.get("vlm_ack_status") or ""),
-                        "retry_reasons": json.dumps(list(normalized.get("vlm_retry_reasons") or [])),
-                        "image_relpath": image_relpath,
-                        "raw_event_relpath": raw_event_relpath,
-                    }
-                    accepted_writer.writerow(accepted_row)
-                    vlm_dispatches_saved += 1
-                    vlm_results_logged += 1
-
-                    _append_jsonl(
-                        events_f,
-                        {
-                            "event_type": "vlm_dispatch_saved",
-                            "timestamp_utc": _utc_now_iso(),
-                            "run_id": run_id,
-                            "source_video": source_video,
-                            "frame_index": dispatch_frame_id,
-                            "track_id": str(inner["vlm_frame_cropper_layer_track_id"]),
-                            "payload": {
+                    if vlm_effective_runtime in ("async", "spill") and vlm_worker is not None:
+                        pending_dispatches.setdefault(str(inner["vlm_frame_cropper_layer_track_id"]), []).append(
+                            {
+                                "dispatch_index": vlm_dispatch_counter,
+                                "frame_index": dispatch_frame_id,
+                                "bbox": bbox,
+                                "tracker_confidence": confidence,
+                                "target_class": target_class,
                                 "image_relpath": image_relpath,
-                                "raw_event_relpath": raw_event_relpath,
-                                "dispatch_mode": dispatch.get("vlm_dispatch_mode"),
-                                "dispatch_reason": dispatch.get("vlm_dispatch_reason"),
-                                "dispatch_cached_crop_count": dispatch.get("vlm_dispatch_cached_crop_count"),
+                                "dispatch_payload": dispatch_payload,
+                            }
+                        )
+                        vlm_worker.submit(
+                            {
+                                "track_id": str(inner["vlm_frame_cropper_layer_track_id"]),
+                                "dispatch_frame_id": dispatch_frame_id,
+                                "prompt_text": prompt_text,
+                                "query_type": vlm_query_type,
+                                "submitted_at": time.time(),
+                                "vlm_crop_pkg": vlm_crop_pkg,
+                            }
+                        )
+                    else:
+                        raw_result = run_vlm_inference_batch(vlm_state, [vlm_crop_pkg], [vlm_query_type])[0]
+                        dispatch_saved_delta, results_logged_delta = _drain_async_result(
+                            result={
+                                "track_id": str(inner["vlm_frame_cropper_layer_track_id"]),
+                                "prompt": prompt_text,
+                                "raw_result": raw_result,
+                                "ack": build_vlm_ack_package_from_result(raw_result),
                             },
-                        },
-                    )
-                    _append_jsonl(
-                        events_f,
-                        {
-                            "event_type": "vlm_result_logged",
-                            "timestamp_utc": _utc_now_iso(),
-                            "run_id": run_id,
-                            "source_video": source_video,
-                            "frame_index": dispatch_frame_id,
-                            "track_id": str(inner["vlm_frame_cropper_layer_track_id"]),
-                            "payload": {
-                                "is_type": bool(normalized.get("is_truck")),
-                                "ack_status": str(normalized.get("vlm_ack_status") or ""),
-                                "retry_reasons": list(normalized.get("vlm_retry_reasons") or []),
+                            pending_dispatches={
+                                str(inner["vlm_frame_cropper_layer_track_id"]): [
+                                    {
+                                        "dispatch_index": vlm_dispatch_counter,
+                                        "frame_index": dispatch_frame_id,
+                                        "bbox": bbox,
+                                        "tracker_confidence": confidence,
+                                        "target_class": target_class,
+                                        "image_relpath": image_relpath,
+                                        "dispatch_payload": dispatch_payload,
+                                    }
+                                ]
                             },
-                        },
-                    )
+                            crop_cache=crop_cache,
+                            accepted_writer=accepted_writer,
+                            events_f=events_f,
+                            raw_events_dir=raw_events_dir,
+                            review_root=review_root,
+                            run_id=run_id,
+                            source_video=source_video,
+                            include_raw_vlm=bool(args.include_raw_vlm),
+                        )
+                        vlm_dispatches_saved += dispatch_saved_delta
+                        vlm_results_logged += results_logged_delta
 
             frames_done += 1
+        if vlm_worker is not None:
+            deadline = time.time() + 300.0
+            while time.time() < deadline:
+                drained_any = False
+                for result in vlm_worker.drain_results():
+                    drained_any = True
+                    dispatch_saved_delta, results_logged_delta = _drain_async_result(
+                        result=result,
+                        pending_dispatches=pending_dispatches,
+                        crop_cache=crop_cache,
+                        accepted_writer=accepted_writer,
+                        events_f=events_f,
+                        raw_events_dir=raw_events_dir,
+                        review_root=review_root,
+                        run_id=run_id,
+                        source_video=source_video,
+                        include_raw_vlm=bool(args.include_raw_vlm),
+                    )
+                    vlm_dispatches_saved += dispatch_saved_delta
+                    vlm_results_logged += results_logged_delta
+                status = vlm_worker.get_status()
+                if not pending_dispatches and status["queue_size"] == 0 and not status["busy"]:
+                    break
+                if not drained_any:
+                    time.sleep(0.02)
+            vlm_worker.shutdown()
 
     input_layer.close_input_layer()
 
@@ -609,7 +783,7 @@ def main() -> None:
         "vlm_available": bool(vlm_available),
         "vlm_backend": vlm_backend,
         "vlm_model": vlm_model,
-        "vlm_runtime_mode_effective": "inline",
+        "vlm_runtime_mode_effective": vlm_effective_runtime,
         "created_at_utc": _utc_now_iso(),
     }
     summary_json_path = summaries_dir / "run_summary.json"

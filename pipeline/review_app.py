@@ -27,6 +27,8 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 
 
 ALLOWED_LABEL_KEYS = {"wrong_class", "true_class", "repeat", "bad_crop"}
+PRIMARY_LABEL_KEYS = {"wrong_class", "true_class"}
+TARGET_CLASSES = {"pickup", "van", "truck", "bus"}
 
 
 def utc_now_iso() -> str:
@@ -64,6 +66,7 @@ def init_db(db_path: Path) -> None:
               target_class TEXT,
               image_relpath TEXT NOT NULL,
               metadata_relpath TEXT,
+              metadata_json TEXT,
               created_at_utc TEXT NOT NULL
             );
 
@@ -96,6 +99,12 @@ def init_db(db_path: Path) -> None:
             CREATE INDEX IF NOT EXISTS ix_review_highlights_item_id ON review_highlights(review_item_id);
             """
         )
+        existing_columns = {
+            str(row[1])
+            for row in conn.execute("PRAGMA table_info(review_items)").fetchall()
+        }
+        if "metadata_json" not in existing_columns:
+            conn.execute("ALTER TABLE review_items ADD COLUMN metadata_json TEXT")
         conn.commit()
     finally:
         conn.close()
@@ -111,8 +120,18 @@ def _read_rows(csv_path: Path) -> list[dict[str, str]]:
 def ingest_review_items(review_root: Path, db_path: Path) -> dict[str, int]:
     conn = sqlite3.connect(str(db_path))
     inserted = 0
+    updated = 0
+    deleted = 0
     skipped = 0
     try:
+        delete_cur = conn.execute(
+            """
+            DELETE FROM review_items
+            WHERE item_type = 'vlm_accepted_target'
+              AND lower(coalesce(target_class, '')) NOT IN ('pickup', 'van', 'truck', 'bus')
+            """
+        )
+        deleted += int(delete_cur.rowcount or 0)
         run_dirs = sorted((review_root / "runs").glob("*"), key=lambda p: p.name)
         for run_dir in run_dirs:
             if not run_dir.is_dir():
@@ -148,14 +167,23 @@ def ingest_review_items(review_root: Path, db_path: Path) -> dict[str, int]:
                         skipped += 1
                         continue
                     target_class = str(row.get("target_class") or "").strip()
+                    if item_type == "vlm_accepted_target" and target_class not in TARGET_CLASSES:
+                        skipped += 1
+                        continue
+                    metadata_json = json.dumps(row, sort_keys=True)
                     cur = conn.execute(
                         """
-                        INSERT OR IGNORE INTO review_items
+                        INSERT INTO review_items
                         (
                           run_id, item_type, source_video, frame_index, track_id,
-                          target_class, image_relpath, metadata_relpath, created_at_utc
+                          target_class, image_relpath, metadata_relpath, metadata_json, created_at_utc
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(run_id, item_type, source_video, frame_index, track_id, image_relpath)
+                        DO UPDATE SET
+                          target_class = excluded.target_class,
+                          metadata_relpath = excluded.metadata_relpath,
+                          metadata_json = excluded.metadata_json
                         """,
                         (
                             run_id,
@@ -166,15 +194,16 @@ def ingest_review_items(review_root: Path, db_path: Path) -> dict[str, int]:
                             target_class,
                             image_relpath,
                             metadata_relpath,
+                            metadata_json,
                             utc_now_iso(),
                         ),
                     )
-                    if cur.rowcount > 0:
+                    if cur.rowcount > 0 and conn.execute("SELECT changes()").fetchone()[0] > 0:
                         inserted += 1
                     else:
-                        skipped += 1
+                        updated += 1
         conn.commit()
-        return {"inserted": inserted, "skipped": skipped}
+        return {"inserted": inserted, "updated": updated, "deleted": deleted, "skipped": skipped}
     finally:
         conn.close()
 
@@ -192,7 +221,7 @@ def _fetch_filters(conn: sqlite3.Connection) -> dict[str, list[str]]:
 
 def _fetch_next_unlabeled(conn: sqlite3.Connection, filters: dict[str, str]) -> dict[str, Any] | None:
     conn.row_factory = sqlite3.Row
-    where_clauses = ["label_presence.review_item_id IS NULL"]
+    where_clauses = ["classification_presence.review_item_id IS NULL"]
     params: list[Any] = []
 
     for key in ("run_id", "item_type", "target_class", "source_video"):
@@ -204,12 +233,14 @@ def _fetch_next_unlabeled(conn: sqlite3.Connection, filters: dict[str, str]) -> 
     sql = f"""
     SELECT
       ri.id, ri.run_id, ri.item_type, ri.source_video, ri.frame_index,
-      ri.track_id, ri.target_class, ri.image_relpath, ri.metadata_relpath
+      ri.track_id, ri.target_class, ri.image_relpath, ri.metadata_relpath, ri.metadata_json
     FROM review_items ri
     LEFT JOIN (
-      SELECT DISTINCT review_item_id FROM review_labels
-    ) AS label_presence
-      ON label_presence.review_item_id = ri.id
+      SELECT DISTINCT review_item_id
+      FROM review_labels
+      WHERE label_key IN ('wrong_class', 'true_class')
+    ) AS classification_presence
+      ON classification_presence.review_item_id = ri.id
     WHERE {' AND '.join(where_clauses)}
     ORDER BY ri.run_id DESC, ri.frame_index ASC, ri.id ASC
     LIMIT 1
@@ -218,6 +249,10 @@ def _fetch_next_unlabeled(conn: sqlite3.Connection, filters: dict[str, str]) -> 
     if row is None:
         return None
     payload = {k: row[k] for k in row.keys()}
+    try:
+        payload["metadata"] = json.loads(str(payload.get("metadata_json") or "{}"))
+    except json.JSONDecodeError:
+        payload["metadata"] = {}
     payload["image_url"] = f"/image?relpath={quote(str(payload['image_relpath']))}"
     payload["labels"] = [
         dict(label_row)
@@ -241,6 +276,53 @@ def _fetch_next_unlabeled(conn: sqlite3.Connection, filters: dict[str, str]) -> 
             ORDER BY id ASC
             """,
             (payload["id"],),
+        ).fetchall()
+    ]
+    return payload
+
+
+def _fetch_item_by_id(conn: sqlite3.Connection, review_item_id: int) -> dict[str, Any] | None:
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        """
+        SELECT
+          id, run_id, item_type, source_video, frame_index,
+          track_id, target_class, image_relpath, metadata_relpath, metadata_json
+        FROM review_items
+        WHERE id = ?
+        """,
+        (review_item_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    payload = {k: row[k] for k in row.keys()}
+    try:
+        payload["metadata"] = json.loads(str(payload.get("metadata_json") or "{}"))
+    except json.JSONDecodeError:
+        payload["metadata"] = {}
+    payload["image_url"] = f"/image?relpath={quote(str(payload['image_relpath']))}"
+    payload["labels"] = [
+        dict(label_row)
+        for label_row in conn.execute(
+            """
+            SELECT id, reviewer, label_key, label_value, created_at_utc
+            FROM review_labels
+            WHERE review_item_id = ?
+            ORDER BY id ASC
+            """,
+            (review_item_id,),
+        ).fetchall()
+    ]
+    payload["highlights"] = [
+        dict(h_row)
+        for h_row in conn.execute(
+            """
+            SELECT id, reviewer, field_name, highlight_text, comment_text, created_at_utc
+            FROM review_highlights
+            WHERE review_item_id = ?
+            ORDER BY id ASC
+            """,
+            (review_item_id,),
         ).fetchall()
     ]
     return payload
@@ -390,6 +472,11 @@ function renderMeta(item) {
     ["track_id", item.track_id], ["target_class", item.target_class || ""],
     ["image_relpath", item.image_relpath], ["metadata_relpath", item.metadata_relpath || ""]
   ];
+  const metadata = item.metadata || {};
+  for (const [k, v] of Object.entries(metadata)) {
+    if (fields.some(([baseKey]) => baseKey === k)) continue;
+    fields.push([k, v]);
+  }
   for (const [k,v] of fields) {
     const tr = document.createElement("tr");
     tr.dataset.field = k;
@@ -468,7 +555,11 @@ async function saveLabel(labelKey) {
     return;
   }
   document.getElementById("label-value").value = "";
-  await loadNext(false);
+  const itemRes = await fetch(`/api/item?id=${currentItem.id}`);
+  const itemData = await itemRes.json();
+  currentItem = itemData.item;
+  renderMeta(currentItem);
+  renderHighlights(currentItem);
   setStatus(`Saved label: ${labelKey}`, true);
 }
 
@@ -548,6 +639,17 @@ class ReviewAppHandler(BaseHTTPRequestHandler):
                 item = _fetch_next_unlabeled(conn, params)
                 stats = _fetch_stats(conn)
             self._send_json({"item": item, "stats": stats})
+            return
+
+        if parsed.path == "/api/item":
+            params = parse_qs(parsed.query)
+            review_item_id = int((params.get("id") or ["0"])[0] or "0")
+            if review_item_id <= 0:
+                self._send_text("Missing valid id", status=HTTPStatus.BAD_REQUEST)
+                return
+            with self._open_conn() as conn:
+                item = _fetch_item_by_id(conn, review_item_id)
+            self._send_json({"item": item})
             return
 
         if parsed.path == "/api/stats":
@@ -672,7 +774,10 @@ def main() -> None:
     }
     print(
         f"[review_app] host={args.host} port={args.port} review_root={review_root} db={db_path} "
-        f"ingested_inserted={ingest_result['inserted']} ingested_skipped={ingest_result['skipped']}",
+        f"ingested_inserted={ingest_result['inserted']} "
+        f"ingested_updated={ingest_result['updated']} "
+        f"ingested_deleted={ingest_result['deleted']} "
+        f"ingested_skipped={ingest_result['skipped']}",
         flush=True,
     )
     print(f"[review_app] open: http://{args.host}:{args.port}", flush=True)

@@ -307,7 +307,7 @@ Do not use streaming as the primary baseline unless needed.
 - [x] Save aligned metadata CSV / JSON
 - [x] Build lightweight review frontend
 - [x] Add `human_truth.sqlite`
-- [ ] Lock one baseline config:
+- [x] Lock one baseline config:
   - one YOLO TRT model
   - one VLM model
   - one runtime mode
@@ -315,7 +315,7 @@ Do not use streaming as the primary baseline unless needed.
   - one VLM model
   - one runtime mode
 - [x] Run baseline daytime clip
-- [ ] Run baseline nighttime clip
+- [x] Run baseline nighttime clip
 - [x] Build config experiment matrix runner
 - [ ] Compare only the most realistic VLM alternatives first
 - [ ] Compare accuracy across selected VLM configs
@@ -329,7 +329,7 @@ Implementation note:
   - stable cases can be run normally
   - currently risky cases are skipped unless `--allow-unstable` is passed on purpose
 - `pipeline/build_report_summary.py` now exists to turn a matrix JSON artifact into report-ready `json` / `md` / `csv`
-- baseline-lock work is now partially implemented:
+- baseline-lock work is now implemented and revalidated:
   - dedicated config file: `src/configuration-layer/config.report-baseline.yaml`
   - dedicated runner support: `pipeline/run_deployment_review.py --config <yaml>`
   - dedicated pair-planning support: `pipeline/run_report_baseline_pair.py`
@@ -342,11 +342,13 @@ Implementation note:
     - day: `data/upson1.mp4`
     - night: `data/sample1.mp4`
   - first `cuda/cuda` baseline attempt was rejected because it crashed at first VLM dispatch with `CUBLAS_STATUS_ALLOC_FAILED`
-  - patched `cuda/cpu` baseline daytime validation is currently in progress on `data/upson1.mp4`
-  - that active baseline process still requires explicit completion verification:
-    - confirm `summaries/run_summary.json` exists
-    - confirm a terminal `run_summary` event was written
-    - confirm the process exited cleanly
+  - patched `cuda/cpu` baseline daytime validation completed successfully on `data/upson1.mp4`
+  - nighttime baseline validation also completed successfully on `data/sample1.mp4`
+  - the review runner now honors `config_vlm_runtime_mode` and no longer hard-codes `inline` in saved summaries
+  - bounded revalidation after the runtime fix:
+    - `pipeline/run_deployment_review.py --config src/configuration-layer/config.report-baseline.yaml --video data/upson1.mp4 --max-frames 1 --config-tag async_runtime_fix_summary_probe`
+    - verified `summaries/run_summary.json` + terminal `run_summary` event
+    - verified `vlm_runtime_mode_effective: async`
   - the baseline pair helper has already been dry-run validated and writes plan artifacts under `review-package/artifacts/`
 - comparison-planning work is now partially implemented for the next TODO:
   - `pipeline/run_experiment_matrix.py --preset may_report_realistic --dry-run`
@@ -372,6 +374,24 @@ Implementation note:
     - builds repo-visible `json` / `md` / `csv` tables from current `compare_against_human_truth` artifacts
   - current output is intentionally sparse because only one reviewed truth-comparison artifact exists so far
   - this gives the report workflow a stable table format now, while leaving room for more reviewed runs later
+- human-truth package alignment work is now largely complete:
+  - documented in:
+    - `may-report-package/human_truth_package_gap_2026-04-24.md`
+  - completed fixes:
+    - review-artifact generation now skips out-of-scope VLM accepted-target rows outside `pickup|van|truck|bus`
+    - review-app ingestion now stores row-level metadata JSON per item
+    - review-app UI now shows aligned row-level metadata fields for highlighting
+    - review queue completion now depends on classification labels instead of any label at all
+    - review-app ingestion now purges stale out-of-scope VLM review items from `human_truth.sqlite`
+    - truth-comparison output now clearly labels current class agreement as a detector-class proxy
+  - remaining open gap:
+    - baseline day/night runs still need real human labeling volume before the report can claim meaningful truth coverage
+
+Immediate next repo-visible follow-up:
+
+- use the now-correct async-aware review runner for any future baseline reruns so new artifacts match the locked config on disk
+- if a fresh full baseline rerun is needed for report purity, rerun the day/night pair with the patched `pipeline/run_deployment_review.py`
+- only after that optional refresh should further one-by-one backend/device checks resume
 - consolidated final-report-table work is now partially implemented:
   - `pipeline/build_may_report_tables.py`
     - aggregates current baseline-pair planning artifacts
@@ -384,4 +404,4 @@ Implementation note:
   - navigation/indexing support now also exists:
     - `pipeline/build_may_report_artifact_index.py`
     - latest report outputs can be discovered through one generated index file instead of hunting across filenames
-  - nighttime baseline run is now in progress on `data/sample1.mp4` using the same locked config and still needs explicit completion verification
+  - the previously generated nighttime baseline artifact was produced before the runtime-fix patch and reports `inline`; keep that provenance in mind if a report needs a fully post-fix baseline rerun
