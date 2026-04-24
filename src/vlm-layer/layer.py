@@ -10,7 +10,7 @@ from typing import Any
 from PIL import Image, ImageDraw, ImageFont
 
 from backends import (
-    gemini_e2b,
+    gemma_e2b_local,
     huggingface_local,
     resolve_vlm_backend_name,
     resolve_vlm_backend_runtime_kind,
@@ -132,10 +132,10 @@ def initialize_vlm_layer(config: VLMConfig) -> VLMRuntimeState:
             model_path=config.config_vlm_model,
             requested_device=config.config_device,
         )
-    elif runtime_backend_kind == "gemini_e2b":
-        backend_state = gemini_e2b.initialize_backend(
-            model_name=config.config_vlm_model,
-            api_key_env=config.config_vlm_api_key_env,
+    elif runtime_backend_kind == "gemma_e2b_local":
+        backend_state = gemma_e2b_local.initialize_backend(
+            model_path=config.config_vlm_model,
+            requested_device=config.config_device,
         )
     else:
         raise NotImplementedError(
@@ -341,8 +341,8 @@ def infer_vlm_semantics(
             image=image,
             prompt_text=vlm_prompt_text,
         )
-    if vlm_runtime_state.vlm_runtime_backend_kind == "gemini_e2b":
-        return gemini_e2b.infer_single(
+    if vlm_runtime_state.vlm_runtime_backend_kind == "gemma_e2b_local":
+        return gemma_e2b_local.infer_single(
             backend_state=vlm_runtime_state.vlm_runtime_backend_state,
             image=image,
             prompt_text=vlm_prompt_text,
@@ -373,8 +373,8 @@ def infer_vlm_semantics_batch(
             images=images,
             prompt_texts=vlm_prompt_texts,
         )
-    if vlm_runtime_state.vlm_runtime_backend_kind == "gemini_e2b":
-        return gemini_e2b.infer_batch(
+    if vlm_runtime_state.vlm_runtime_backend_kind == "gemma_e2b_local":
+        return gemma_e2b_local.infer_batch(
             backend_state=vlm_runtime_state.vlm_runtime_backend_state,
             images=images,
             prompt_texts=vlm_prompt_texts,
@@ -808,7 +808,7 @@ def preview_vlm_applied_prompt(vlm_runtime_state: VLMRuntimeState, vlm_prompt_te
     """Return the chat-template-expanded prompt string (for debug / visualization)."""
     if not vlm_runtime_state.config_vlm_enabled:
         return ""
-    if vlm_runtime_state.vlm_runtime_backend_kind == "gemini_e2b":
+    if vlm_runtime_state.vlm_runtime_backend_kind == "gemma_e2b_local":
         return vlm_prompt_text
     if vlm_runtime_state.vlm_runtime_backend_kind == "huggingface_local":
         processor = vlm_runtime_state.vlm_runtime_backend_state.get("processor")

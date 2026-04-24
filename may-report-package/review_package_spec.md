@@ -21,9 +21,20 @@ Accuracy review and speed benchmarking are separate workflows.
   - one night clip
 - Baseline report config is locked before wide comparisons:
   - one YOLO TRT model
-  - one VLM model
+- one VLM model
   - one VLM runtime mode
 - Local recorded video on Jetson is the baseline input for report comparisons.
+
+Speed benchmarking note for the current branch:
+
+- accuracy review and baseline report runs still lock one VLM model at a time
+- separate speed benchmarking for this stage should compare all three modular VLM options:
+  - `smolvlm_256m`
+  - `qwen_0_8b`
+  - `gemma_e2b_local`
+- for each of those, compare `cpu` vs `cuda`
+- do not require INT8 / low-bit VLM benchmarking for this report stage because the repo does not yet provide one clean, modular, apples-to-apples INT8 path across all three models
+- record quantization as a later experiment after the modular cpu/cuda path is implemented and stable
 
 ## 3. Current Pipeline Reality
 
@@ -484,6 +495,15 @@ Primary speed axes:
 - VLM device
 - VLM runtime mode
 
+Current Jetson safety note:
+
+- do not treat every `backend × device` case as equally safe to batch-run unattended
+- on this machine, attempting the unstable full three-backend `cpu/cuda` matrix has been associated with:
+  - SSH disconnect
+  - temporary ping failure
+  - host recovery only after about `5` minutes
+- the matrix runner should therefore default to a safe mode that skips currently known risky combinations unless the operator explicitly opts in
+
 Secondary axes if time remains:
 
 - YOLO model
@@ -533,4 +553,4 @@ To reduce ambiguity for the next agent, these choices are locked in:
   - `bad_crop`
 - performance workflow is speed-only
 - truth workflow owns accuracy evaluation
-
+- the experiment-matrix helper should be conservative by default on Jetson and require an explicit opt-in before re-running host-risky backend/device combinations

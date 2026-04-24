@@ -36,6 +36,7 @@ CONFIG_ALLOWED_VLM_BACKENDS = {
     "huggingface_local",
     "smolvlm_256m",
     "qwen_0_8b",
+    "gemma_e2b_local",
     "gemini_e2b",
 }
 

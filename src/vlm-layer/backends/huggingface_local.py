@@ -39,6 +39,22 @@ def initialize_backend(
     runtime_device = _resolve_device(torch=torch, requested_device=requested_device)
     runtime_dtype = torch.bfloat16 if runtime_device == "cuda" else torch.float32
 
+    model_name_lower = resolved_model_path.name.strip().lower()
+    is_qwen_like = ("qwen" in model_name_lower) or (backend_name == "qwen_0_8b")
+
+    load_kwargs: dict[str, Any] = {
+        "trust_remote_code": True,
+        "local_files_only": True,
+        "torch_dtype": runtime_dtype,
+    }
+    if is_qwen_like:
+        # Qwen loads can spike memory on Jetson; this reduces peak host memory.
+        load_kwargs["low_cpu_mem_usage"] = True
+    if runtime_device == "cuda":
+        # Prefer low-peak loading on GPU machines; fallback below if accelerate/device_map is unavailable.
+        load_kwargs["low_cpu_mem_usage"] = True
+        load_kwargs["device_map"] = "auto"
+
     try:
         processor = AutoProcessor.from_pretrained(
             resolved_model_path,
@@ -47,17 +63,20 @@ def initialize_backend(
         )
         _set_decoder_only_processor_left_padding(processor)
         model_class = _load_model_class(transformers)
-        model = model_class.from_pretrained(
-            resolved_model_path,
-            torch_dtype=runtime_dtype,
-            trust_remote_code=True,
-            local_files_only=True,
-        )
+        model = model_class.from_pretrained(resolved_model_path, **load_kwargs)
+    except (ImportError, RuntimeError) as exc:
+        if load_kwargs.get("device_map") == "auto":
+            # Some environments lack accelerate/device_map support; retry without it.
+            load_kwargs.pop("device_map", None)
+            model = model_class.from_pretrained(resolved_model_path, **load_kwargs)
+        else:
+            raise
     except (KeyError, ValueError) as exc:
         _raise_if_unsupported_qwen35_model_type(exc)
         raise
 
-    model = model.to(runtime_device)
+    if not hasattr(model, "hf_device_map"):
+        model = model.to(runtime_device)
     model.eval()
 
     return {

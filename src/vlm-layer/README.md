@@ -122,11 +122,16 @@ Current backend implementations:
 - `qwen_0_8b`
   - local Hugging Face checkpoint
   - supports `cpu` and `cuda`
+- `gemma_e2b_local`
+  - local Gemma E2B GGUF backend via `llama.cpp`
+  - uses `config_vlm_model` as a local GGUF directory or model file path
+  - supports `cpu` and `cuda` through local `llama.cpp` execution
+
+Legacy alias:
+
 - `gemini_e2b`
-  - remote Gemini API backend
-  - uses `config_vlm_model` as the remote model name
-  - uses `config_vlm_api_key_env` for the API key
-  - does not use local `cpu` / `cuda` execution
+  - kept only as a compatibility alias
+  - currently resolves to the same local Gemma E2B runtime as `gemma_e2b_local`
 
 - `VLMFrameCropperLayerPackage`
   - includes:
