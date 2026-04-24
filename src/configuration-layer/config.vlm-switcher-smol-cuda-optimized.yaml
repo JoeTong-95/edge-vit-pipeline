@@ -3,6 +3,7 @@
 # Purpose:
 # - keep the same SmolVLM backend/device path as the original CUDA case
 # - use the currently intended Jetson-oriented async tuning
+# - enable a small real microbatch so the async worker can amortize VLM overhead
 # - use this as the "after optimization" CUDA comparison case
 
 config_device: cuda
@@ -26,7 +27,7 @@ config_vlm_crop_cache_size: 4
 config_vlm_dead_after_lost_frames: 30
 config_vlm_runtime_mode: async
 config_vlm_worker_max_queue_size: 64
-config_vlm_worker_batch_size: 1
+config_vlm_worker_batch_size: 2
 config_vlm_worker_batch_wait_ms: 50
 config_vlm_worker_spill_queue_path: data/vlm_spill_queue.jsonl
 config_vlm_spill_max_file_mb: 512

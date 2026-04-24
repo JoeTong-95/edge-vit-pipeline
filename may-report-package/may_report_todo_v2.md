@@ -436,6 +436,18 @@ Implementation note:
               - `config_vlm_worker_batch_wait_ms`
               - spill/deferred queue processing for backlog-heavy clips
             - if we revisit model optimization later, prefer a matched smaller/quantized Smol path before reopening Gemma CUDA
+          - first bounded Smol CUDA optimization result on the dedicated optimization branch:
+            - `config.vlm-switcher-smol-cuda-og.yaml`
+              - batch `1`
+              - wait `24 ms`
+              - bounded `sample1` / `60`-frame run duration about `24.192 s`
+            - `config.vlm-switcher-smol-cuda-optimized.yaml`
+              - initial batch `4` attempt was faster but unstable due to CUDA batch-capacity failures
+              - current tuned setting:
+                - batch `2`
+                - wait `50 ms`
+              - bounded `sample1` / `60`-frame run duration about `16.491 s`
+              - same logged result count as the OG comparison run
   - refreshed package-generation follow-up in this cycle:
     - identified and patched an async teardown issue in:
       - `pipeline/run_deployment_review.py`

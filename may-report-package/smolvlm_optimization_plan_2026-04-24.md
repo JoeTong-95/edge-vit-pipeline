@@ -27,6 +27,28 @@ Those issues are already documented elsewhere and are not the best report-stage 
   - `src/configuration-layer/config.vlm-switcher-smol-cuda-og.yaml`
   - `src/configuration-layer/config.vlm-switcher-smol-cuda-optimized.yaml`
 
+## Current Branch Finding
+
+The first bounded optimization pass has already refined what “optimized” should mean on this Jetson.
+
+- original comparison config:
+  - `config.vlm-switcher-smol-cuda-og.yaml`
+  - batch size `1`
+  - batch wait `24 ms`
+- tested optimized variants:
+  - batch size `4` + wait `50 ms`
+    - reduced wall time
+    - but produced worker-error rows from CUDA batch-capacity failures
+    - not selected as the keeper
+  - batch size `2` + wait `50 ms`
+    - completed cleanly
+    - kept the same bounded result count as the OG run
+    - reduced bounded run duration on `data/sample1.mp4` / `60` frames from about `24.192 s` to about `16.491 s`
+- current preferred tuned comparison config:
+  - `config.vlm-switcher-smol-cuda-optimized.yaml`
+  - batch size `2`
+  - batch wait `50 ms`
+
 ## Goal
 
 Use the VLM switcher to compare a controlled “before vs after” Smol CUDA path, then keep the changes that improve throughput or stability without undermining the locked report baseline.
@@ -63,8 +85,8 @@ First levers to tune:
 ## Suggested Execution Order
 
 1. Revalidate `cuda-og` and `cuda-optimized` through the switcher helper.
-2. Measure whether the current “optimized” wait-window change helps materially.
-3. If needed, add one more tuned Smol config that changes only one additional lever.
+2. Measure whether the tuned async config helps materially on a bounded real run.
+3. Keep `batch=2` as the current tuned setting unless a later pass finds a better stable point.
 4. Compare results with the existing helper/matrix tooling.
 5. Keep the report baseline on CPU unless a stronger full-path stability result is shown.
 
