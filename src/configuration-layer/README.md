@@ -6,6 +6,8 @@ This layer owns loading, normalizing, validating, and serving the shared `config
 
 Use [`config_node.py`](config_node.py) as the public entry point.
 
+Defaults live in [`config_defaults.py`](config_defaults.py) and are merged into any partial config before validation.
+
 Public functions:
 - `load_config`
 - `validate_config`
@@ -19,13 +21,14 @@ Common fields:
 - `config_input_source`: `video` or `camera`
 - `config_input_path`: video path when source is `video`
 - `config_device`: `cpu` or `cuda`
-- `config_yolo_model`: bundled model such as `yolov8n.pt`, `yolov10n.pt`, `yolov11n.pt`, or `yolov11v28_jingtao.pt`
+- `config_yolo_model`: detector checkpoint name or path such as `yolov8n.pt`, `yolov10n.pt`, `yolov11n.pt`, `yolov11v28_jingtao.pt`, or `yolo11n_6class_finetuned.engine`
 - `config_yolo_confidence_threshold`: detection confidence threshold
 - `config_frame_resolution`: target frame size metadata
 - `config_vlm_enabled`: run VLM inference paths when true (requires PyTorch, `transformers`, and a valid `config_vlm_model` path)
-- `config_vlm_backend`: VLM backend family selector; use `smolvlm_256m` or `qwen_0_8b` for local Hugging Face checkpoints, or `gemma_e2b_local` for the local GGUF/llama.cpp Gemma E2B path
-- `config_vlm_model`: filesystem path to the VLM weights (repo-relative paths resolve from the repository root, e.g. `src/vlm-layer/Qwen3.5-0.8B`)
+- `config_vlm_backend`: VLM backend family selector; use `auto`, `huggingface_local`, `smolvlm_256m`, `qwen_0_8b`, `gemma_e2b_local`, or `gemini_e2b`
+- `config_vlm_model`: filesystem path to the VLM weights; the helper scripts resolve repo-relative paths from the repository root, e.g. `src/vlm-layer/Qwen3.5-0.8B`
 - `config_vlm_api_key_env`: reserved for future remote backends; current local backends ignore it
+- `config_vlm_device`: optional per-VLM device override; leave blank to inherit `config_device`
 - `config_vlm_crop_feedback_enabled`: when true, VLM may request a better crop round; when false, VLM runs in single-shot mode and the first dispatched image completes that track
 - `config_vlm_crop_cache_size`: number of crops collected in one round before dispatch
 - `config_vlm_dead_after_lost_frames`: consecutive `lost` tracking updates required before the cropper marks a track dead and finalizes with the best available partial cache
@@ -53,7 +56,8 @@ model_name = get_config_value(config, "config_yolo_model")
 
 - Relative video paths in `config_input_path` are resolved against the repo root, so `data/sample3.mp4` works even when you launch scripts from a layer subfolder.
 - `config_device` accepts `cpu` or `cuda`. Use `cuda` for GPU-backed YOLO inference when your environment supports CUDA.
-- The current default config is set up to run against the bundled sample video and local YOLO weights.
+- The checked-in `config.yaml` is a runnable project profile, not the dataclass default set. The dataclass defaults in `config_defaults.py` point at `data/sample3.mp4`, `yolov8n.pt`, and VLM disabled.
+- Helper scripts resolve repo-relative VLM model paths from the repository root and, when needed, from `src/vlm-layer/`.
 
 ## Where This Config Is Used Right Now
 
