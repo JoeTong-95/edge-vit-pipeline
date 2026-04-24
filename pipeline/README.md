@@ -30,6 +30,11 @@ These scripts are helpers around the layer APIs, not replacements for the layer 
 - `src/vlm-layer/util/visualize_vlm_roi_realtime.py`: ROI-integrated non-blocking VLM helper; calibrates ROI first, then keeps the ROI-local feed moving while cropper-selected VLM inference runs on a background worker.
 - `src/tracking-layer/util/automated_evaluation.py`: sequential benchmark sweep across CPU/CUDA, YOLO v8/v10/v11, and tracking on/off.
 - `src/tracking-layer/util/plot_evaluation_results.py`: creates styled summary plots from the evaluation SQLite output.
+- `pipeline/run_deployment_review.py`: headless review-artifact generator that writes `review-package/runs/<run_id>/...` for the human-truth workflow.
+- `pipeline/review_app.py`: lightweight local labeling UI backed by `review-package/human_truth.sqlite`.
+- `pipeline/compare_against_human_truth.py`: computes tracker/VLM/metadata agreement metrics from the saved review database.
+- `pipeline/run_experiment_matrix.py`: report-stage VLM backend/device matrix runner that wraps the modular benchmark harness and defaults to safe mode on Jetson.
+- `pipeline/build_report_summary.py`: converts a matrix-run JSON artifact into report-ready `json` / `md` / `csv` summaries.
 
 ## Running on Jetson
 

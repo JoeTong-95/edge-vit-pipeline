@@ -7,6 +7,7 @@ SUPPORTED_VLM_BACKENDS = {
     "huggingface_local",
     "smolvlm_256m",
     "qwen_0_8b",
+    "gemma_e2b_local",
     "gemini_e2b",
 }
 
@@ -43,6 +44,6 @@ def resolve_vlm_backend_runtime_kind(config_vlm_backend: str, config_vlm_model: 
     )
     if backend_name in _HUGGINGFACE_LOCAL_BACKENDS:
         return "huggingface_local"
-    if backend_name == "gemini_e2b":
-        return "gemini_e2b"
+    if backend_name in {"gemma_e2b_local", "gemini_e2b"}:
+        return "gemma_e2b_local"
     raise ValueError(f"Unsupported resolved VLM backend: {backend_name}")

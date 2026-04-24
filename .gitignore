@@ -14,6 +14,7 @@ __pycache__/
 *.onnx
 *.engine
 *.bin
+*.gguf
 
 # ---------------------------------------------------------------------------
 # Local run outputs (keep these out of git)

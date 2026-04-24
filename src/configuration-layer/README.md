@@ -23,9 +23,9 @@ Common fields:
 - `config_yolo_confidence_threshold`: detection confidence threshold
 - `config_frame_resolution`: target frame size metadata
 - `config_vlm_enabled`: run VLM inference paths when true (requires PyTorch, `transformers`, and a valid `config_vlm_model` path)
-- `config_vlm_backend`: VLM backend family selector; use `smolvlm_256m` or `qwen_0_8b` for current local Hugging Face checkpoints, `auto` to infer from the model path
+- `config_vlm_backend`: VLM backend family selector; use `smolvlm_256m` or `qwen_0_8b` for local Hugging Face checkpoints, or `gemma_e2b_local` for the local GGUF/llama.cpp Gemma E2B path
 - `config_vlm_model`: filesystem path to the VLM weights (repo-relative paths resolve from the repository root, e.g. `src/vlm-layer/Qwen3.5-0.8B`)
-- `config_vlm_api_key_env`: environment variable name that stores the Gemini API key when using the `gemini_e2b` backend
+- `config_vlm_api_key_env`: reserved for future remote backends; current local backends ignore it
 - `config_vlm_crop_feedback_enabled`: when true, VLM may request a better crop round; when false, VLM runs in single-shot mode and the first dispatched image completes that track
 - `config_vlm_crop_cache_size`: number of crops collected in one round before dispatch
 - `config_vlm_dead_after_lost_frames`: consecutive `lost` tracking updates required before the cropper marks a track dead and finalizes with the best available partial cache
