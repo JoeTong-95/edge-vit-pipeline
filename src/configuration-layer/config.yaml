@@ -41,7 +41,7 @@ config_evaluation_output_enabled: false                          # options: true
 # config_yolo_model — Detector checkpoint file name or path controlling model size and classes.
 # config_yolo_confidence_threshold — Minimum detector confidence to keep a detection box.
 # config_vlm_enabled — Turns on VLM model load and semantic inference on vehicle crops.
-# config_vlm_backend — Selects the VLM backend family; planned GRACE option is `grace_fhwa`.
+# config_vlm_backend — Selects the VLM backend family; GRACE uses `grace_fhwa`.
 # config_vlm_model — Directory path containing local VLM weights/config; GRACE checkpoints stay local on this Jetson.
 # config_vlm_api_key_env — Reserved for future remote backends; ignored by current local backends.
 # config_vlm_crop_feedback_enabled — If true, uses VLM ack/retry to refine crops; false keeps this profile single-shot. GRACE should normally run accepted/no-retry.

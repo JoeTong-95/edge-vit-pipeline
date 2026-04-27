@@ -50,7 +50,7 @@ def main() -> None:
         vlm_layer_track_id='101',
         vlm_layer_query_type='vehicle_semantics_v1',
         vlm_layer_model_id='test-model',
-        vlm_layer_raw_text='truck_type: dump_truck\nwheel_count: 6\nestimated_weight_kg: 12000-18000',
+        vlm_layer_raw_text='vehicle_type: dump_truck\naxle_count: 3\nack_status: accepted',
     ))
     update_vehicle_state_from_vlm(vlm_package)
     record_101 = get_vehicle_state_record(101)
@@ -70,7 +70,7 @@ def main() -> None:
         vlm_layer_track_id='303',
         vlm_layer_query_type='vehicle_semantics_single_shot_v1',
         vlm_layer_model_id='test-model',
-        vlm_layer_raw_text='{"is_truck": false, "truck_type": "unknown", "confidence": 0.91}',
+        vlm_layer_raw_text='{"is_target_vehicle": false, "vehicle_type": "sedan", "confidence": 0.91}',
     ))
     update_vehicle_state_from_vlm(not_truck_package)
     record_303 = get_vehicle_state_record(303)

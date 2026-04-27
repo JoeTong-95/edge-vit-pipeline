@@ -25,7 +25,7 @@ Common fields:
 - `config_yolo_confidence_threshold`: detection confidence threshold
 - `config_frame_resolution`: target frame size metadata
 - `config_vlm_enabled`: run VLM inference paths when true (requires PyTorch, `transformers`, and a valid `config_vlm_model` path)
-- `config_vlm_backend`: VLM backend family selector; use `auto`, `huggingface_local`, `smolvlm_256m`, `qwen_0_8b`, `gemma_e2b_local`, `gemini_e2b`, or planned `grace_fhwa`
+- `config_vlm_backend`: VLM backend family selector; use `auto`, `huggingface_local`, `smolvlm_256m`, `qwen_0_8b`, `gemma_e2b_local`, `gemini_e2b`, or `grace_fhwa`
 - `config_vlm_model`: filesystem path to the VLM weights; the helper scripts resolve repo-relative paths from the repository root, e.g. `src/vlm-layer/Qwen3.5-0.8B`
 - `config_vlm_api_key_env`: reserved for future remote backends; current local backends ignore it
 - `config_vlm_device`: optional per-VLM device override; leave blank to inherit `config_device`
@@ -43,9 +43,9 @@ Common fields:
 
 GRACE integration note:
 
-- GRACE source is planned to live under `src/vlm-layer/grace_integration/`.
+- GRACE source lives under `src/vlm-layer/grace_integration/`.
 - GRACE checkpoints remain local on the Jetson and ignored by git.
-- GRACE target vehicle types are planned to live in an editable YAML file under `src/vlm-layer/grace_integration/`.
+- GRACE target vehicle types live in an editable YAML file under `src/vlm-layer/grace_integration/`.
 - The active VLM semantic contract uses `is_target_vehicle` and `axle_count`; `estimated_weight_kg` and `wheel_count` are not part of the active contract.
 
 ## Typical Startup Flow

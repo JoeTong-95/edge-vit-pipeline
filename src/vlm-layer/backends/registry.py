@@ -9,6 +9,7 @@ SUPPORTED_VLM_BACKENDS = {
     "qwen_0_8b",
     "gemma_e2b_local",
     "gemini_e2b",
+    "grace_fhwa",
 }
 
 _HUGGINGFACE_LOCAL_BACKENDS = {
@@ -32,6 +33,8 @@ def resolve_vlm_backend_name(config_vlm_backend: str, config_vlm_model: str) -> 
         return "smolvlm_256m"
     if "qwen" in model_name:
         return "qwen_0_8b"
+    if "grace" in model_name:
+        return "grace_fhwa"
     if model_name:
         return "huggingface_local"
     return "huggingface_local"
@@ -46,4 +49,6 @@ def resolve_vlm_backend_runtime_kind(config_vlm_backend: str, config_vlm_model: 
         return "huggingface_local"
     if backend_name in {"gemma_e2b_local", "gemini_e2b"}:
         return "gemma_e2b_local"
+    if backend_name == "grace_fhwa":
+        return "grace_fhwa"
     raise ValueError(f"Unsupported resolved VLM backend: {backend_name}")

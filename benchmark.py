@@ -316,6 +316,7 @@ def main() -> None:
     scene_enabled = bool(get_config_value(cfg, "config_scene_awareness_enabled"))
 
     vlm_enabled = bool(get_config_value(cfg, "config_vlm_enabled"))
+    vlm_backend = str(get_config_value(cfg, "config_vlm_backend"))
     vlm_model = str(get_config_value(cfg, "config_vlm_model"))
     # config_vlm_device overrides config_device for the VLM only.
     # Empty string means inherit from config_device (default behaviour).
@@ -370,6 +371,7 @@ def main() -> None:
     _p("measure_only_after_roi_lock", str(bool(MEASURE_ONLY_AFTER_ROI_LOCK and roi_enabled)))
     _p("scene_enabled", str(scene_enabled and scene_available))
     _p("vlm_enabled", str(vlm_enabled))
+    _p("vlm_backend", vlm_backend)
     _p("vlm_model", _resolve_repo_path(vlm_model) if vlm_model else "none")
     if vlm_enabled:
         _p("vlm_device", vlm_device)
@@ -430,6 +432,7 @@ def main() -> None:
             vlm_state = initialize_vlm_layer(
                 VLMConfig(
                     config_vlm_enabled=True,
+                    config_vlm_backend=vlm_backend,
                     config_vlm_model=_resolve_repo_path(vlm_model),
                     config_device=vlm_device,
                 )
@@ -1028,4 +1031,3 @@ def _git_branch() -> str:
 
 if __name__ == "__main__":
     main()
-

@@ -29,6 +29,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description='Run a smoke test for the VLM layer.')
     parser.add_argument('--image', type=Path, default=DEFAULT_IMAGE_PATH)
     parser.add_argument('--track-id', default='burner-track-001')
+    parser.add_argument('--backend', default='auto')
+    parser.add_argument('--model', type=Path, default=None)
     parser.add_argument('--device', default='auto')
     parser.add_argument('--query-type', default='vehicle_semantics_v1')
     parser.add_argument('--disabled', action='store_true')
@@ -51,7 +53,8 @@ def main() -> None:
 
     config = layer.VLMConfig(
         config_vlm_enabled=not args.disabled,
-        config_vlm_model=str(layer.DEFAULT_VLM_MODEL_PATH),
+        config_vlm_backend=str(args.backend),
+        config_vlm_model=str(args.model.expanduser().resolve() if args.model else layer.DEFAULT_VLM_MODEL_PATH),
         config_device=args.device,
     )
 

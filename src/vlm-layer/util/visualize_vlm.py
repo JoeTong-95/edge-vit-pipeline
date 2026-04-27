@@ -115,6 +115,7 @@ def load_runtime_settings() -> dict[str, Any]:
         "conf": get_config_value(config, "config_yolo_confidence_threshold"),
         "device": get_config_value(config, "config_device"),
         "vlm_enabled": get_config_value(config, "config_vlm_enabled"),
+        "vlm_backend": get_config_value(config, "config_vlm_backend"),
         "vlm_model": _resolve_vlm_model_path(get_config_value(config, "config_vlm_model")),
         "vlm_crop_feedback_enabled": get_config_value(config, "config_vlm_crop_feedback_enabled"),
         "vlm_crop_cache_size": get_config_value(config, "config_vlm_crop_cache_size"),
@@ -366,7 +367,7 @@ def build_right_panel(panel_h: int, panel_w: int, focus_track_id: str | None, cr
     elif debug.get('normalized_result') is not None:
         accepted_lines = ['ack=accepted']
         accepted_color = GOOD
-        if debug['normalized_result'].get('is_truck') is False:
+        if debug['normalized_result'].get('is_target_vehicle') is False:
             accepted_lines.append('VLM rejected this track as not one of the flagged labels.')
             accepted_color = NO_COLOR
         else:
@@ -419,14 +420,13 @@ def build_right_panel(panel_h: int, panel_w: int, focus_track_id: str | None, cr
         judge_lines = [f'ack=retry_requested', f'reasons: {reason_text}', 'VLM wants a better image.']
         draw_text_block(panel, judge_lines, (24, judge_y + 50), color=WARN, scale=0.31, line_gap=16)
     elif normalized:
-        if normalized.get('is_truck') is False:
+        if normalized.get('is_target_vehicle') is False:
             draw_text_block(panel, ['ack=accepted', 'Rejected label result:', 'no'], (24, judge_y + 46), color=NO_COLOR, scale=0.31, line_gap=16)
         else:
             draw_text_block(panel, ['ack=accepted', 'JSON classification:'], (24, judge_y + 46), color=GOOD, scale=0.31, line_gap=16)
             json_lines = pretty_json_snippet({
-                'is_truck': normalized.get('is_truck'),
-                'wheel_count': normalized.get('wheel_count'),
-                'estimated_weight_kg': normalized.get('estimated_weight_kg'),
+                'is_target_vehicle': normalized.get('is_target_vehicle'),
+                'axle_count': normalized.get('axle_count'),
                 'ack_status': normalized.get('vlm_ack_status'),
                 'retry_reasons': normalized.get('vlm_retry_reasons'),
             })
@@ -441,7 +441,7 @@ def build_right_panel(panel_h: int, panel_w: int, focus_track_id: str | None, cr
         tags = vehicle_record.get('vehicle_state_layer_semantic_tags', {})
         tag_text = ', '.join(f'{k}={v}' for k, v in list(tags.items())[:4]) or 'none'
         meta_lines = [
-            f"is_truck={vehicle_record.get('vehicle_state_layer_semantic_tags', {}).get('is_truck', 'unknown')}",
+            f"is_target_vehicle={vehicle_record.get('vehicle_state_layer_semantic_tags', {}).get('is_target_vehicle', 'unknown')}",
             f"terminal={vehicle_record.get('vehicle_state_layer_terminal_status', 'tracking')}",
             f"vlm_called={vehicle_record.get('vehicle_state_layer_vlm_called')}",
             f"ack_status={vehicle_record.get('vehicle_state_layer_vlm_ack_status')}",
@@ -515,7 +515,14 @@ def main() -> None:
             raise RuntimeError(f'Could not create output video: {args.output}')
 
     vlm_device = args.vlm_device.strip() or args.device
-    vlm_state = initialize_vlm_layer(VLMConfig(config_vlm_enabled=bool(defaults['vlm_enabled']), config_vlm_model=defaults['vlm_model'], config_device=vlm_device))
+    vlm_state = initialize_vlm_layer(
+        VLMConfig(
+            config_vlm_enabled=bool(defaults['vlm_enabled']),
+            config_vlm_backend=defaults['vlm_backend'],
+            config_vlm_model=defaults['vlm_model'],
+            config_device=vlm_device,
+        )
+    )
     input_layer = InputLayer()
     input_layer.initialize_input_layer(config_input_source=args.input_source, config_frame_resolution=frame_resolution, config_input_path=args.video, camera_device_index=args.camera_index, use_gstreamer=args.gstreamer)
     initialize_yolo_layer(model_name=args.model, conf_threshold=args.conf, device=args.device)

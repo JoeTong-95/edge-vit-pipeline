@@ -26,6 +26,7 @@ DEFAULT_BENCHMARK_SCRIPT = REPO_ROOT / "src" / "vlm-layer" / "test" / "benchmark
 DEFAULT_REVIEW_ROOT = REPO_ROOT / "review-package"
 DEFAULT_ARTIFACTS_DIR = DEFAULT_REVIEW_ROOT / "artifacts"
 DEFAULT_GEMMA_MODEL = REPO_ROOT / "src" / "vlm-layer" / "models" / "gemma-4-e2b-gguf"
+DEFAULT_GRACE_MODEL = REPO_ROOT / "src" / "vlm-layer" / "grace_integration"
 
 KNOWN_UNSTABLE_CASES: dict[tuple[str, str], str] = {
     (
@@ -60,6 +61,11 @@ CASE_PRESETS: dict[str, dict[str, Any]] = {
                 "backend": "gemma_e2b_local",
                 "device": "cpu",
                 "selection_reason": "Still a realistic local candidate to probe on CPU before attempting broader model/runtime changes.",
+            },
+            {
+                "backend": "grace_fhwa",
+                "device": "cuda",
+                "selection_reason": "Dedicated local FHWA classifier intended to replace prompt-based vehicle semantics on Jetson.",
             },
         ],
     },
@@ -142,6 +148,7 @@ def _build_case_command(
     smol_model: Path | None,
     qwen_model: Path | None,
     gemma_model: Path | None,
+    grace_model: Path | None,
 ) -> list[str]:
     command = [
         sys.executable,
@@ -167,6 +174,8 @@ def _build_case_command(
         command.extend(["--qwen-model", str(qwen_model)])
     if gemma_model is not None:
         command.extend(["--gemma-model", str(gemma_model)])
+    if grace_model is not None:
+        command.extend(["--grace-model", str(grace_model)])
     return command
 
 
@@ -201,6 +210,7 @@ def _run_case(
     smol_model: Path | None,
     qwen_model: Path | None,
     gemma_model: Path | None,
+    grace_model: Path | None,
 ) -> dict[str, Any]:
     case_output_json = artifacts_dir / f"{backend}__{device}.json"
     command = _build_case_command(
@@ -215,6 +225,7 @@ def _run_case(
         smol_model=smol_model,
         qwen_model=qwen_model,
         gemma_model=gemma_model,
+        grace_model=grace_model,
     )
 
     started = time.perf_counter()
@@ -269,8 +280,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run the report-stage VLM backend/device matrix safely.")
     parser.add_argument(
         "--backends",
-        default="smolvlm_256m,qwen_0_8b,gemma_e2b_local",
-        help="Comma-separated list from: smolvlm_256m,qwen_0_8b,gemma_e2b_local",
+        default="smolvlm_256m,qwen_0_8b,gemma_e2b_local,grace_fhwa",
+        help="Comma-separated list from: smolvlm_256m,qwen_0_8b,gemma_e2b_local,grace_fhwa",
     )
     parser.add_argument("--devices", default="cpu,cuda", help="Comma-separated list from: cpu,cuda")
     parser.add_argument("--image", type=Path, default=REPO_ROOT / "src" / "vlm-layer" / "truckimage.png")
@@ -284,6 +295,7 @@ def main() -> None:
     parser.add_argument("--smol-model", type=Path, default=REPO_ROOT / "src" / "vlm-layer" / "SmolVLM-256M-Instruct")
     parser.add_argument("--qwen-model", type=Path, default=REPO_ROOT / "src" / "vlm-layer" / "Qwen3.5-0.8B")
     parser.add_argument("--gemma-model", type=Path, default=DEFAULT_GEMMA_MODEL if DEFAULT_GEMMA_MODEL.exists() else None)
+    parser.add_argument("--grace-model", type=Path, default=DEFAULT_GRACE_MODEL)
     parser.add_argument(
         "--allow-unstable",
         action="store_true",
@@ -304,7 +316,7 @@ def main() -> None:
 
     backends = _parse_csv_values(
         args.backends,
-        {"smolvlm_256m", "qwen_0_8b", "gemma_e2b_local"},
+        {"smolvlm_256m", "qwen_0_8b", "gemma_e2b_local", "grace_fhwa"},
         "backends",
     )
     devices = _parse_csv_values(args.devices, {"cpu", "cuda"}, "devices")
@@ -325,6 +337,7 @@ def main() -> None:
     smol_model = args.smol_model.expanduser().resolve() if args.smol_model else None
     qwen_model = args.qwen_model.expanduser().resolve() if args.qwen_model else None
     gemma_model = args.gemma_model.expanduser().resolve() if args.gemma_model else None
+    grace_model = args.grace_model.expanduser().resolve() if args.grace_model else None
 
     requested_cases, preset_description = _resolve_requested_cases(
         preset=str(args.preset or "").strip(),
@@ -380,6 +393,7 @@ def main() -> None:
                 smol_model=smol_model,
                 qwen_model=qwen_model,
                 gemma_model=gemma_model,
+                grace_model=grace_model,
             )
         except subprocess.TimeoutExpired as exc:
             result = {

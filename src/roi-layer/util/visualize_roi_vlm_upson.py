@@ -133,6 +133,7 @@ def load_runtime_settings() -> dict[str, Any]:
         "conf": get_config_value(config, "config_yolo_confidence_threshold"),
         "device": get_config_value(config, "config_device"),
         "vlm_enabled": get_config_value(config, "config_vlm_enabled"),
+        "vlm_backend": get_config_value(config, "config_vlm_backend"),
         "vlm_model": _resolve_vlm_model_path(get_config_value(config, "config_vlm_model")),
         "vlm_crop_feedback_enabled": get_config_value(config, "config_vlm_crop_feedback_enabled"),
         "vlm_crop_cache_size": get_config_value(config, "config_vlm_crop_cache_size"),
@@ -276,6 +277,7 @@ def main() -> None:
     vlm_state = initialize_vlm_layer(
         VLMConfig(
             config_vlm_enabled=bool(defaults["vlm_enabled"]),
+            config_vlm_backend=defaults["vlm_backend"],
             config_vlm_model=defaults["vlm_model"],
             config_device=vlm_device,
         )

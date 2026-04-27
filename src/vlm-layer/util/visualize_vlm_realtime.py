@@ -364,6 +364,7 @@ def main() -> None:
     vlm_state = initialize_vlm_layer(
         VLMConfig(
             config_vlm_enabled=bool(defaults["vlm_enabled"]),
+            config_vlm_backend=defaults["vlm_backend"],
             config_vlm_model=defaults["vlm_model"],
             config_device=vlm_device,
         )

@@ -32,6 +32,19 @@ class ConfigurationLayerTests(unittest.TestCase):
         )
         validate_config(config)
 
+    def test_validate_config_accepts_grace_backend(self) -> None:
+        config = load_config(
+            {
+                "config_device": "cpu",
+                "config_input_source": "camera",
+                "config_input_path": None,
+                "config_vlm_enabled": True,
+                "config_vlm_backend": "grace_fhwa",
+                "config_vlm_model": "src/vlm-layer/grace_integration",
+            }
+        )
+        validate_config(config)
+
     def test_validate_config_rejects_missing_video_path(self) -> None:
         config = load_config(
             {
