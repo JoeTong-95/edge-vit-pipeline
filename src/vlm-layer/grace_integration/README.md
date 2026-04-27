@@ -21,7 +21,7 @@ Architecture: ConvNeXtV2-Base backbone → Rotated Gaussian Axle Head → Gaussi
 ## Directory Structure
 
 ```
-GRACE_inference_package/
+src/vlm-layer/grace_integration/
 ├── inference.py            # Main inference script (CLI + importable)
 ├── config.yaml             # Model architecture config
 ├── requirements.txt        # Python dependencies

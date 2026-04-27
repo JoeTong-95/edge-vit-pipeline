@@ -21,7 +21,7 @@ __pycache__/
 # Local hydrated/model artifact directories
 src/vlm-layer/Qwen3.5-0.8B-local-hydrated/
 src/vlm-layer/SmolVLM-256M-Instruct/
-src/GRACE_inference_package/checkpoint/
+src/vlm-layer/grace_integration/checkpoint/
 _archive/experimental-models/
 _archive/*.engine.bak
 

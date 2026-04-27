@@ -128,14 +128,15 @@ def merge_tracking_into_vehicle_state(vehicle_state_record: dict[str, Any], trac
 def merge_vlm_into_vehicle_state(vehicle_state_record: dict[str, Any], vlm_layer_label: str, vlm_layer_attributes: dict[str, Any]) -> None:
     semantic_tags = vehicle_state_record["vehicle_state_layer_semantic_tags"]
     semantic_tags.update(deepcopy(vlm_layer_attributes))
-    if vlm_layer_attributes.get("is_truck") is False:
+    is_target_vehicle = bool(vlm_layer_attributes.get("is_target_vehicle", True))
+    if is_target_vehicle is False:
         vehicle_state_record["vehicle_state_layer_truck_type"] = _DEFAULT_TRUCK_TYPE
     else:
         vehicle_state_record["vehicle_state_layer_truck_type"] = vlm_layer_attributes.get("truck_type") or _DEFAULT_TRUCK_TYPE
     vehicle_state_record["vehicle_state_layer_vlm_called"] = True
     vehicle_state_record["vehicle_state_layer_vlm_ack_status"] = "accepted"
     vehicle_state_record["vehicle_state_layer_vlm_retry_requested"] = False
-    vehicle_state_record["vehicle_state_layer_terminal_status"] = "no" if vlm_layer_attributes.get("is_truck") is False else "done"
+    vehicle_state_record["vehicle_state_layer_terminal_status"] = "no" if is_target_vehicle is False else "done"
 
 
 def merge_vlm_ack_into_vehicle_state(vehicle_state_record: dict[str, Any], vlm_ack_status: str, vlm_ack_retry_requested: bool, vlm_ack_reason: str) -> None:

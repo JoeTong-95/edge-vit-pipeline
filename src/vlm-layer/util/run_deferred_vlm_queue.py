@@ -43,6 +43,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--queue", required=True, help="Path to deferred queue JSONL file.")
     parser.add_argument("--out", required=True, help="Path to output JSONL file.")
     parser.add_argument("--model", required=True, help="Path to local VLM checkpoint directory.")
+    parser.add_argument(
+        "--backend",
+        default="auto",
+        help="VLM backend name (auto|huggingface_local|smolvlm_256m|qwen_0_8b|gemma_e2b_local|grace_fhwa).",
+    )
     parser.add_argument("--device", default="auto", help="Device for VLM (auto|cpu|cuda).")
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--limit", type=int, default=0, help="Process at most N tasks (0 = all).")
@@ -63,6 +68,7 @@ def main() -> None:
     vlm_state = initialize_vlm_layer(
         VLMConfig(
             config_vlm_enabled=True,
+            config_vlm_backend=str(args.backend),
             config_vlm_model=str(Path(args.model).expanduser()),
             config_device=str(args.device),
         )

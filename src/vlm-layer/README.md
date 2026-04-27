@@ -126,7 +126,7 @@ Current backend implementations:
   - local Gemma E2B GGUF backend via `llama.cpp`
   - uses `config_vlm_model` as a local GGUF directory or model file path
   - supports `cpu` and `cuda` through local `llama.cpp` execution
-- `grace_fhwa` (planned)
+- `grace_fhwa`
   - local GRACE FHWA classifier integration under `src/vlm-layer/grace_integration/`
   - uses a Jetson-local checkpoint ignored by git
   - emits structured classifier results translated into the VLM JSON contract
@@ -440,7 +440,7 @@ Layer changes in this branch
   `ack_status`, and `retry_reasons`.
 - Removed `estimated_weight_kg` and `wheel_count` from the active VLM
   contract. Axles are represented directly with `axle_count`.
-- Documented the planned GRACE backend route under
+- Documented the GRACE backend route under
   `src/vlm-layer/grace_integration/`, including local Jetson checkpoint policy
   and an editable GRACE target vehicle type YAML.
 - Removed `vlm_image_quality_notes` from the active VLM contract and kept

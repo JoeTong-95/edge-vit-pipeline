@@ -89,6 +89,7 @@ def _run_truck_session(
     yolo_conf: float,
     roi_enabled: bool,
     roi_threshold: int,
+    vlm_backend: str,
     vlm_model_resolved: str,
     vlm_crop_cache_size: int,
     vlm_dead_after_lost: int,
@@ -139,6 +140,7 @@ def _run_truck_session(
         vlm_state = initialize_vlm_layer(
             VLMConfig(
                 config_vlm_enabled=True,
+                config_vlm_backend=vlm_backend,
                 config_vlm_model=vlm_model_resolved,
                 config_device=device,
             )
@@ -700,6 +702,7 @@ def main() -> int:
         args.vlm_dead_after_lost if args.vlm_dead_after_lost is not None else get_config_value(cfg, "config_vlm_dead_after_lost_frames")
     )
     vlm_rel = args.vlm_model if args.vlm_model is not None else str(get_config_value(cfg, "config_vlm_model"))
+    vlm_backend = str(get_config_value(cfg, "config_vlm_backend"))
     vlm_model_resolved = _resolve_repo_path(vlm_rel)
     if args.frame_width is not None and args.frame_height is not None:
         frame_resolution = (int(args.frame_width), int(args.frame_height))
@@ -740,6 +743,7 @@ def main() -> int:
                 yolo_conf=yolo_conf,
                 roi_enabled=roi_enabled,
                 roi_threshold=roi_threshold,
+                vlm_backend=vlm_backend,
                 vlm_model_resolved=vlm_model_resolved,
                 vlm_crop_cache_size=part_a_crop_cache,
                 vlm_dead_after_lost=vlm_dead_after_lost,
@@ -788,6 +792,7 @@ def main() -> int:
                 yolo_conf=yolo_conf,
                 roi_enabled=roi_enabled,
                 roi_threshold=roi_threshold,
+                vlm_backend=vlm_backend,
                 vlm_model_resolved=vlm_model_resolved,
                 vlm_crop_cache_size=cache_sz,
                 vlm_dead_after_lost=vlm_dead_after_lost,
@@ -853,6 +858,7 @@ def main() -> int:
             yolo_conf=yolo_conf,
             roi_enabled=roi_enabled,
             roi_threshold=roi_threshold,
+            vlm_backend=vlm_backend,
             vlm_model_resolved=vlm_model_resolved,
             vlm_crop_cache_size=csz,
             vlm_dead_after_lost=vlm_dead_after_lost,

@@ -208,7 +208,10 @@ def run_comparison(review_root: Path, run_id: str = "") -> dict[str, Any]:
             run_key = str(row.get("run_id") or "")
             track_key = str(row.get("track_id") or "")
             key = (run_key, track_key)
-            predicted_is_type = _to_bool(row.get("is_type", "false"), default=False)
+            predicted_is_type = _to_bool(
+                row.get("is_target_vehicle", row.get("is_type", "false")),
+                default=False,
+            )
             ack_status = str(row.get("ack_status") or "").strip().lower()
             if ack_status == "retry_requested":
                 retry_count += 1

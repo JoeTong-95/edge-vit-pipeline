@@ -99,6 +99,7 @@ def load_runtime_settings() -> dict[str, Any]:
         "roi_enabled": get_config_value(config, "config_roi_enabled"),
         "roi_threshold": get_config_value(config, "config_roi_vehicle_count_threshold"),
         "vlm_enabled": get_config_value(config, "config_vlm_enabled"),
+        "vlm_backend": get_config_value(config, "config_vlm_backend"),
         "vlm_model": _resolve_vlm_model_path(get_config_value(config, "config_vlm_model")),
         "output": "",
     }
@@ -306,12 +307,12 @@ def make_canvas(
             vlm_lines = [
                 f"frame={latest_vlm['frame_id']}",
                 f"label={latest_vlm['label']}",
-                f"is_truck={normalized.get('is_truck')}",
+                f"is_target_vehicle={normalized.get('is_target_vehicle')}",
                 f"truck_type={normalized.get('truck_type')}",
                 f"confidence={normalized.get('vlm_layer_confidence')}",
                 f"raw={latest_vlm['raw_text'][:120]}",
             ]
-            vlm_color = GOOD if normalized.get("is_truck") is not False else BAD
+            vlm_color = GOOD if normalized.get("is_target_vehicle") is not False else BAD
     draw_text_block(info_panel, ["Latest VLM result"], (14, 382), scale=0.40, line_gap=18)
     draw_text_block(info_panel, vlm_lines, (14, 408), color=vlm_color, scale=0.33, line_gap=18)
 
@@ -370,6 +371,7 @@ def main() -> None:
     vlm_state = initialize_vlm_layer(
         VLMConfig(
             config_vlm_enabled=bool(defaults["vlm_enabled"]),
+            config_vlm_backend=defaults["vlm_backend"],
             config_vlm_model=defaults["vlm_model"],
             config_device=args.vlm_device.strip() or args.device,
         )

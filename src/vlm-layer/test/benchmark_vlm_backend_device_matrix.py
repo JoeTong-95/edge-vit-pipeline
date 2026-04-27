@@ -20,6 +20,7 @@ LAYER_PATH = VLM_DIR / "layer.py"
 DEFAULT_IMAGE_PATH = VLM_DIR / "truckimage.png"
 DEFAULT_SMOL_PATH = VLM_DIR / "SmolVLM-256M-Instruct"
 DEFAULT_QWEN_PATH = VLM_DIR / "Qwen3.5-0.8B"
+DEFAULT_GRACE_PATH = VLM_DIR / "grace_integration"
 
 
 def _load_layer_module() -> Any:
@@ -78,6 +79,21 @@ def _checkpoint_ready_for_gemma(model_path: Path) -> tuple[bool, str]:
     return True, "ready"
 
 
+def _checkpoint_ready_for_grace(model_path: Path) -> tuple[bool, str]:
+    if not model_path.exists():
+        return False, f"missing model path: {model_path}"
+    required = [
+        model_path / "inference.py",
+        model_path / "config.yaml",
+        model_path / "target_vehicle_types.yaml",
+        model_path / "checkpoint" / "best_axle_graph_v6.pt",
+    ]
+    missing = [path.name for path in required if not path.exists()]
+    if missing:
+        return False, "missing GRACE files: " + ", ".join(missing)
+    return True, "ready"
+
+
 def _parse_devices(raw: str) -> list[str]:
     devices = [part.strip().lower() for part in raw.split(",") if part.strip()]
     if not devices:
@@ -93,7 +109,7 @@ def _parse_backends(raw: str) -> list[str]:
     backends = [part.strip().lower() for part in raw.split(",") if part.strip()]
     if not backends:
         raise ValueError("At least one backend must be provided.")
-    allowed = {"smolvlm_256m", "qwen_0_8b", "gemma_e2b_local"}
+    allowed = {"smolvlm_256m", "qwen_0_8b", "gemma_e2b_local", "grace_fhwa"}
     invalid = [item for item in backends if item not in allowed]
     if invalid:
         raise ValueError(f"Unsupported backends: {invalid}. Allowed: {sorted(allowed)}")
@@ -202,8 +218,8 @@ def main() -> None:
     parser.add_argument("--image", type=Path, default=DEFAULT_IMAGE_PATH)
     parser.add_argument(
         "--backends",
-        default="smolvlm_256m,qwen_0_8b,gemma_e2b_local",
-        help="Comma-separated list from: smolvlm_256m,qwen_0_8b,gemma_e2b_local",
+        default="smolvlm_256m,qwen_0_8b,gemma_e2b_local,grace_fhwa",
+        help="Comma-separated list from: smolvlm_256m,qwen_0_8b,gemma_e2b_local,grace_fhwa",
     )
     parser.add_argument("--devices", default="cpu,cuda", help="Comma-separated list from: cpu,cuda")
     parser.add_argument("--warmup-runs", type=int, default=0)
@@ -211,6 +227,7 @@ def main() -> None:
     parser.add_argument("--query-type", default="vehicle_semantics_single_shot_v1")
     parser.add_argument("--smol-model", type=Path, default=DEFAULT_SMOL_PATH)
     parser.add_argument("--qwen-model", type=Path, default=DEFAULT_QWEN_PATH)
+    parser.add_argument("--grace-model", type=Path, default=DEFAULT_GRACE_PATH)
     parser.add_argument(
         "--gemma-model",
         type=Path,
@@ -232,6 +249,7 @@ def main() -> None:
         ("smolvlm_256m", Path(args.smol_model).expanduser().resolve() if args.smol_model else None, "huggingface_local"),
         ("qwen_0_8b", Path(args.qwen_model).expanduser().resolve() if args.qwen_model else None, "huggingface_local"),
         ("gemma_e2b_local", Path(args.gemma_model).expanduser().resolve() if args.gemma_model else None, "gemma_e2b_local"),
+        ("grace_fhwa", Path(args.grace_model).expanduser().resolve() if args.grace_model else None, "grace_fhwa"),
     ]
 
     results: list[dict[str, Any]] = []
@@ -254,8 +272,10 @@ def main() -> None:
 
             if family == "huggingface_local":
                 ready, reason = _checkpoint_ready_for_hf(model_path)
-            else:
+            elif family == "gemma_e2b_local":
                 ready, reason = _checkpoint_ready_for_gemma(model_path)
+            else:
+                ready, reason = _checkpoint_ready_for_grace(model_path)
 
             if not ready:
                 results.append(

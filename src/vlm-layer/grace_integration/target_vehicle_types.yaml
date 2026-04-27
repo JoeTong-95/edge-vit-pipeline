@@ -1,0 +1,22 @@
+# Editable GRACE target vehicle-type gate.
+#
+# GRACE predicts one of the vehicle_type labels from inference.py. Keep this
+# list aligned with the classes that should count as target vehicles for the
+# pipeline's VLM semantic gate.
+target_vehicle_types:
+  - bus
+  - box_truck
+  - car_carrier
+  - concrete_mixer
+  - construction_vehicle
+  - delivery_van
+  - dump_truck
+  - flatbed
+  - garbage_truck
+  - logging_truck
+  - pickup
+  - semi_tractor
+  - tanker
+  - tow_truck
+  - utility_truck
+  - van
