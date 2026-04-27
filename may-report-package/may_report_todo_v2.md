@@ -448,6 +448,15 @@ Implementation note:
                 - wait `50 ms`
               - bounded `sample1` / `60`-frame run duration about `16.491 s`
               - same logged result count as the OG comparison run
+              - approximate bounded gain:
+                - about `31.8%` lower runtime
+                - about `1.47x` faster
+            - this update was kept and merged back into `jetson-dev`
+            - important limit:
+              - this is a bounded Smol CUDA helper/review-run improvement
+              - it does **not** by itself justify changing the locked May-report CPU baseline
+            - supporting robustness fix from the same pass:
+              - async review runs no longer crash when a whole microbatch fails and returns no `raw_result`
   - refreshed package-generation follow-up in this cycle:
     - identified and patched an async teardown issue in:
       - `pipeline/run_deployment_review.py`

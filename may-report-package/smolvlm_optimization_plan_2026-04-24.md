@@ -30,6 +30,7 @@ Those issues are already documented elsewhere and are not the best report-stage 
 ## Current Branch Finding
 
 The first bounded optimization pass has already refined what “optimized” should mean on this Jetson.
+That update was later pushed on `smol256-optimization` and merged back into `jetson-dev`, so this document reflects the current dev-branch reading rather than a side experiment that was abandoned.
 
 - original comparison config:
   - `config.vlm-switcher-smol-cuda-og.yaml`
@@ -44,10 +45,30 @@ The first bounded optimization pass has already refined what “optimized” sho
     - completed cleanly
     - kept the same bounded result count as the OG run
     - reduced bounded run duration on `data/sample1.mp4` / `60` frames from about `24.192 s` to about `16.491 s`
+    - approximate improvement:
+      - about `31.8%` lower bounded runtime
+      - about `1.47x` faster on that bounded comparison
 - current preferred tuned comparison config:
   - `config.vlm-switcher-smol-cuda-optimized.yaml`
   - batch size `2`
   - batch wait `50 ms`
+  - important caveat:
+    - this is a bounded helper/review-run optimization result
+    - it does **not** by itself move the locked May-report baseline off the CPU VLM path
+
+## Robustness Update From This Pass
+
+The optimization run also exposed one async-runner robustness issue.
+
+- file:
+  - `pipeline/run_deployment_review.py`
+- previous bug:
+  - if an async microbatch failed and produced `raw_result=None`, the review runner could crash while trying to normalize the missing result
+- fix:
+  - failed async batches now emit a synthetic logged error payload instead of aborting the whole run
+- interpretation:
+  - this fix is not the performance win itself
+  - it was necessary to test larger microbatches honestly without confusing runner crashes with model/runtime behavior
 
 ## Goal
 
