@@ -1,4 +1,5 @@
 chat-history/
+.codex
 
 # Python bytecode / caches
 __pycache__/
@@ -8,13 +9,21 @@ __pycache__/
 *.pickle
 
 # Model weights and checkpoints
-#*.pt
-#*.pth
-#*.ckpt
+*.pt
+*.pth
+*.ckpt
+*.safetensors
 *.onnx
 *.engine
 *.bin
 *.gguf
+
+# Local hydrated/model artifact directories
+src/vlm-layer/Qwen3.5-0.8B-local-hydrated/
+src/vlm-layer/SmolVLM-256M-Instruct/
+src/GRACE_inference_package/checkpoint/
+_archive/experimental-models/
+_archive/*.engine.bak
 
 # ---------------------------------------------------------------------------
 # Local run outputs (keep these out of git)

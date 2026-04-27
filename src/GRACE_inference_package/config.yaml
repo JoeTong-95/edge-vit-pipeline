@@ -1,0 +1,22 @@
+model:
+  type: "axle_graph_v26"
+  backbone: "convnextv2_base.fcmae_ft_in22k_in1k"
+  pretrained: false  # weights come from checkpoint, not HuggingFace
+
+  num_fhwa_classes: 13
+  num_vehicle_types: 21
+  num_trailer_classes: 4
+
+  max_axles: 12
+  max_segments: 5
+  min_sigma: 0.01
+  max_sigma: 0.15
+  use_soft_predictions: true
+
+  axle_feature_dim: 64
+  segment_feature_dim: 64
+  gnn_output_dim: 128
+  num_coarse_layers: 1
+  num_fine_layers: 1
+  heatmap_height: 56
+  heatmap_width: 56
