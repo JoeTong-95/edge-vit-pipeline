@@ -41,10 +41,10 @@ config_evaluation_output_enabled: false                          # options: true
 # config_yolo_model — Detector checkpoint file name or path controlling model size and classes.
 # config_yolo_confidence_threshold — Minimum detector confidence to keep a detection box.
 # config_vlm_enabled — Turns on VLM model load and semantic inference on vehicle crops.
-# config_vlm_backend — Selects the VLM backend family; `auto` infers from the configured model path.
-# config_vlm_model — Directory path containing the local VLM weights and config.
+# config_vlm_backend — Selects the VLM backend family; planned GRACE option is `grace_fhwa`.
+# config_vlm_model — Directory path containing local VLM weights/config; GRACE checkpoints stay local on this Jetson.
 # config_vlm_api_key_env — Reserved for future remote backends; ignored by current local backends.
-# config_vlm_crop_feedback_enabled — If true, uses VLM ack/retry to refine crops; false keeps this profile single-shot.
+# config_vlm_crop_feedback_enabled — If true, uses VLM ack/retry to refine crops; false keeps this profile single-shot. GRACE should normally run accepted/no-retry.
 # config_vlm_crop_cache_size — How many recent scored crops per track are retained for best-crop selection.
 # config_vlm_dead_after_lost_frames — Consecutive tracker “lost” updates before the cropper treats the track as dead.
 # config_vlm_runtime_mode — inline runs VLM in the frame loop; async uses a worker thread; spill writes overflow to disk.

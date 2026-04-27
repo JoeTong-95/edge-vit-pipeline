@@ -102,18 +102,23 @@ This is a strong integration role because these layers sit at the boundary betwe
 
 The current VLM contract is intentionally narrow:
 
-- first decide whether the crop is one of the currently active YOLO target labels: `pickup`, `van`, `truck`, or `bus`
-- if not, return `is_truck=false` and acknowledge the track with reason `no`
-- if yes, return a small JSON payload with only:
-  - `wheel_count`
-  - `estimated_weight_kg`
+- first decide whether the crop is a target vehicle for the active semantic backend
+- prompt-based VLMs use the currently active YOLO target labels, such as `pickup`, `van`, `truck`, or `bus`
+- the GRACE backend uses its own editable target vehicle type YAML under `src/vlm-layer/grace_integration/`
+- if not, return `is_target_vehicle=false` and acknowledge the track with reason `no`
+- if yes, return a small JSON payload with:
+  - `is_target_vehicle`
+  - `axle_count`
   - `ack_status`
   - `retry_reasons`
+  - backend-specific class fields, such as GRACE FHWA class and vehicle type
 
 Important notes:
 
-- the allowed label set comes from the currently active detector-label filter, not from a separate semantic vocabulary
-- for the current repo objective, labels outside `pickup`, `van`, `truck`, and `bus` are out of scope even if a detector model can emit them
+- prompt-based VLM allowed labels come from the currently active detector-label filter
+- GRACE target vehicle types are intentionally separate from YOLO tags because GRACE emits a vehicle-type classifier vocabulary, not detector labels
+- `estimated_weight_kg` is no longer part of the active VLM contract
+- `wheel_count` is no longer part of the active VLM contract; axle count is represented directly as `axle_count`
 - `retry_reasons` is the structured explanation for a bad crop
 - the currently allowed retry reasons are:
   - `occluded`
@@ -703,8 +708,8 @@ Recommended retry-reason vocabulary for `vlm_ack_reason` or the VLM-side `retry_
 
 Current target gate rule:
 
-- if VLM decides the crop is not one of the currently flagged detector labels, the acknowledgement is accepted with reason `no` and downstream state marks the track `no`
-- if VLM decides the crop is one of the currently flagged detector labels, semantic JSON is accepted and downstream state marks the track `done`
+- if VLM decides the crop is not a target vehicle for that backend, the acknowledgement is accepted with reason `no` and downstream state marks the track `no`
+- if VLM decides the crop is a target vehicle for that backend, semantic JSON is accepted and downstream state marks the track `done`
 
 Ownership:
 
@@ -726,10 +731,13 @@ Internal functions:
 
 Expected `vehicle_semantics_v1` behavior:
 
-- the prompt should first ask: is this one of the currently active YOLO target labels: `pickup`, `van`, `truck`, or `bus`?
-- if no: return `is_truck=false`, `ack_status=accepted`, and no retry reasons
-- if yes and the image is good enough: return rigid JSON with `wheel_count`, `estimated_weight_kg`, `ack_status=accepted`, and `retry_reasons=[]`
+- the prompt should first ask whether this is a target vehicle for the active backend
+- prompt-based VLMs ask whether this is one of the currently active YOLO target labels: `pickup`, `van`, `truck`, or `bus`
+- GRACE checks target status against `src/vlm-layer/grace_integration/target_vehicle_types.yaml`
+- if no: return `is_target_vehicle=false`, `ack_status=accepted`, and no retry reasons
+- if yes and the image is good enough: return rigid JSON with `is_target_vehicle=true`, `axle_count`, `ack_status=accepted`, and `retry_reasons=[]`
 - if yes but the image is not good enough: return rigid JSON with `ack_status=retry_requested` plus one or more retry reasons such as `occluded` or `bad_angle`
+- GRACE does not judge crop quality; successful GRACE inference should normally return `ack_status=accepted` and `retry_reasons=[]`
 
 Interacts with:
 
@@ -1050,5 +1058,4 @@ The next useful document should be a strict layer-to-layer interface table with 
 - required fields
 - optional fields
 - notes
-
 

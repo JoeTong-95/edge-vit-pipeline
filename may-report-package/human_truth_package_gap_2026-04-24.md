@@ -36,7 +36,7 @@ But the implementation was not yet fully aligned with the report-package contrac
      - plus metadata highlights
 
 4. [x] The comparison script could produce misleading class metrics.
-   - The current VLM contract exposes `is_truck` / `is_type`, not a full normalized downstream class label from VLM.
+   - The current VLM contract exposes `is_target_vehicle`, not a full normalized downstream class label from VLM.
    - Existing class-agreement output was effectively comparing human `true_class` against the saved detector `target_class` proxy.
 
 5. [ ] The package still lacks report-scale human labeling coverage.
