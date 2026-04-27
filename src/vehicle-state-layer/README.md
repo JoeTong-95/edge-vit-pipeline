@@ -32,8 +32,8 @@ The package now also exposes:
 the current VLM path:
 
 - `tracking`: normal tracked flow, no terminal VLM decision yet
-- `done`: VLM accepted the crop as a truck and semantic JSON was stored
-- `no`: VLM rejected the track as not one of the currently flagged detector labels
+- `done`: VLM accepted the crop as a target vehicle and semantic JSON was stored
+- `no`: VLM rejected the track as not a target vehicle for the active backend
 - `dead`: the track aged out on the cropper-side lost-threshold path before a full semantic round completed
 
 ## Quick Start
@@ -50,15 +50,17 @@ The orchestration script `src/vlm-layer/util/visualize_vlm.py` calls `update_veh
 
 The active VLM prompt in this branch no longer asks for `truck_type`.
 
-`vehicle_state_layer_truck_type` therefore acts as a compatibility field for
-older downstream expectations, while the active VLM semantic payload now mainly
-centers on:
+`vehicle_state_layer_truck_type` therefore acts as a legacy compatibility field
+for older downstream expectations. The active VLM semantic payload now centers
+on:
 
-- `is_truck`
-- `wheel_count`
-- `estimated_weight_kg`
+- `is_target_vehicle`
+- `axle_count`
 - `vlm_ack_status`
 - `vlm_retry_reasons`
+
+`estimated_weight_kg` and `wheel_count` are no longer part of the active VLM
+contract.
 
 ## Changes
 
@@ -69,7 +71,7 @@ Layer changes in this branch
   `vehicle_state_layer_truck_type` now behaves as a legacy compatibility slot
   rather than an actively populated semantic target.
 - Updated `README.md` to explain that the active VLM semantic payload now
-  centers on `is_truck`, `wheel_count`, `estimated_weight_kg`,
+  centers on `is_target_vehicle`, `axle_count`,
   `vlm_ack_status`, and `vlm_retry_reasons`.
 
 - Added `vehicle_state_layer.py` implementing the pipeline contract public API:
@@ -95,7 +97,7 @@ Layer changes in this branch
 - Added `vehicle_state_layer_terminal_status` so persistent per-track state now
   records whether a vehicle is still `tracking`, has reached semantic `done`,
   or is terminal `dead`.
-- Updated VLM merge and ack merge behavior so `is_truck=false` marks a track
-  `dead`, while accepted truck semantics mark the track `done`.
+- Updated VLM merge and ack merge behavior so `is_target_vehicle=false` marks a
+  track `no`, while accepted target-vehicle semantics mark the track `done`.
 - Split terminal rejection semantics so VLM label rejection now marks a track
   `no`, while `dead` remains reserved for the lost-threshold path.

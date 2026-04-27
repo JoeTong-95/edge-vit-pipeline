@@ -61,13 +61,13 @@ Important current fields already available:
 - VLM result:
   - `vlm_ack_status`
   - `vlm_retry_reasons`
-  - current normalized `is_truck`
+  - current normalized `is_target_vehicle`
 
 Implementation note:
 
-- internally the VLM layer can keep using `is_truck`
-- for review/export, add `is_type`
-- `is_type` means whether VLM agrees with the YOLO target type decision for that target
+- internally the VLM layer should use `is_target_vehicle`
+- for review/export, add `is_target_vehicle`
+- `is_target_vehicle` means whether VLM agrees that the crop belongs to the active target-vehicle set for that backend
 
 ## 4. Top-Level Folder Contract
 
@@ -222,7 +222,7 @@ Required columns:
 - `from_cache`
 - `model_id`
 - `query_type`
-- `is_type`
+- `is_target_vehicle`
 - `ack_status`
 - `retry_reasons`
 - `image_relpath`
@@ -263,7 +263,7 @@ This is the minimal result payload to expose in review/export outputs:
 - `source_video`
 - `model_id`
 - `query_type`
-- `is_type`
+- `is_target_vehicle`
 - `ack_status`
 - `retry_reasons`
 - `target_class`
@@ -273,8 +273,8 @@ Field definitions:
 - `target_class`
   - normalized downstream class
   - one of `pickup`, `van`, `truck`, `bus`
-- `is_type`
-  - whether VLM agrees with the YOLO target type decision for this item
+- `is_target_vehicle`
+  - whether VLM agrees this item is in the active target-vehicle set for the configured backend
 - `ack_status`
   - current VLM ack status from pipeline normalization
 - `retry_reasons`
@@ -543,7 +543,7 @@ To reduce ambiguity for the next agent, these choices are locked in:
 
 - `new_tracks` uses first `status == new` frame, not "best crop"
 - `vlm_accepted_targets` saves one image per actual VLM dispatch event
-- `is_type` is an export/review field, not a required full internal rename
+- `is_target_vehicle` is the export/review field for the active target gate
 - cache behavior is tracked with metadata fields, not separate folders
 - raw VLM text is optional debug only
 - review labels are limited to:

@@ -126,6 +126,10 @@ Current backend implementations:
   - local Gemma E2B GGUF backend via `llama.cpp`
   - uses `config_vlm_model` as a local GGUF directory or model file path
   - supports `cpu` and `cuda` through local `llama.cpp` execution
+- `grace_fhwa` (planned)
+  - local GRACE FHWA classifier integration under `src/vlm-layer/grace_integration/`
+  - uses a Jetson-local checkpoint ignored by git
+  - emits structured classifier results translated into the VLM JSON contract
 
 Legacy alias:
 
@@ -166,19 +170,22 @@ The default query type is:
 
 This now uses a rigid short prompt that asks the model to do only two things:
 
-- decide whether the crop matches one of the currently active YOLO labels such as `truck` or `bus`
+- decide whether the crop is a target vehicle for the active backend
 - if yes, return JSON with:
-  - `wheel_count`
-  - `estimated_weight_kg`
+  - `is_target_vehicle`
+  - `axle_count`
   - `ack_status`
   - `retry_reasons`
 
 Current notes:
 
+- `is_target_vehicle` replaces the old `is_truck` gate in the active contract
 - `truck_type` is no longer part of the active prompt contract
 - model-side `confidence` is no longer requested in the active prompt contract
-- `wheel_count` and `estimated_weight_kg` are now expected as integer values
+- `estimated_weight_kg` is removed from the active contract
+- `wheel_count` is removed from the active contract; use `axle_count` directly
 - retry explanation is carried only through `retry_reasons`
+- GRACE does not judge crop quality; successful GRACE inference should normally translate to `ack_status=accepted` and `retry_reasons=[]`
 
 ## Smoke Test
 
@@ -428,9 +435,14 @@ Layer changes in this branch
 - Spill queue JSONL: optional size-based rotation before each append (`config_vlm_spill_max_file_mb` → `maybe_rotate_spill_file` in `vlm_deferred_queue.py`; `visualize_vlm_realtime.AsyncVLMWorker` passes the byte limit). Rotated files are named `*.jsonl.rotated.<ms>` next to the active file.
 
 - Simplified the active VLM prompt contract to a short rigid JSON-only format:
-  first answer whether the crop matches an active YOLO label such as `truck`
-  or `bus`, then if yes return only numeric `wheel_count`,
-  numeric `estimated_weight_kg`, `ack_status`, and `retry_reasons`.
+  first answer whether the crop is a target vehicle for the active backend,
+  then if yes return `is_target_vehicle`, numeric `axle_count`,
+  `ack_status`, and `retry_reasons`.
+- Removed `estimated_weight_kg` and `wheel_count` from the active VLM
+  contract. Axles are represented directly with `axle_count`.
+- Documented the planned GRACE backend route under
+  `src/vlm-layer/grace_integration/`, including local Jetson checkpoint policy
+  and an editable GRACE target vehicle type YAML.
 - Removed `vlm_image_quality_notes` from the active VLM contract and kept
   `retry_reasons` as the only structured explanation for bad crops such as
   `occluded` or `bad_angle`.
@@ -464,7 +476,7 @@ Layer changes in this branch
 ## 2026-04-10
 
 - Added explicit truck gate semantics to the VLM normalization and ack path:
-  `is_truck=false` now returns an accepted `not_truck` acknowledgement so
+  `is_target_vehicle=false` now returns an accepted `no` acknowledgement so
   downstream state can mark the track `dead`.
 - Updated the visualizer orchestration so cropper dispatch mode
   `dead_best_available` uses a single-shot truck check and still produces a

@@ -105,10 +105,11 @@ The current branch also implements a stricter optional VLM dispatch loop around 
 Short version:
 
 - VLM first decides whether the crop is one of the currently active YOLO labels, currently `pickup`, `van`, `truck`, or `bus`
-- if yes, it returns a small rigid JSON payload
+- GRACE uses an editable GRACE target vehicle type YAML instead of YOLO labels because it emits a classifier vocabulary
+- if yes, the active backend returns a small rigid JSON payload
 - the current JSON focuses on:
-  - `wheel_count`
-  - `estimated_weight_kg`
+  - `is_target_vehicle`
+  - `axle_count`
   - `ack_status`
   - `retry_reasons`
 - the current debug-image workflow in `src/vlm-layer` saves:
@@ -118,6 +119,7 @@ Short version:
   - actual VLM output
 - if no, the track is acknowledged with reason `no`
 - subtype-style free-form semantic notes are not part of the current contract
+- `estimated_weight_kg` and `wheel_count` are removed from the active VLM contract; axle count is represented directly as `axle_count`
 
 Once a track is accepted and its semantic JSON is written into persistent state, that track is treated as progressed: YOLO and tracking may still keep following it, but cropper and VLM no longer run again for that same track unless the contract is explicitly changed.
 
@@ -159,10 +161,12 @@ The current target-label gate also adds a terminal split:
   first decide whether the crop matches one of the active target vehicle
   labels: `pickup`, `van`, `truck`, or `bus`, then if yes return rigid JSON.
 - Documented that the active VLM JSON now focuses on:
-  - `wheel_count`
-  - `estimated_weight_kg`
+  - `is_target_vehicle`
+  - `axle_count`
   - `ack_status`
   - `retry_reasons`
+- Documented that `estimated_weight_kg` and `wheel_count` are no longer part
+  of the active VLM contract.
 - Documented that `vlm_image_quality_notes` is no longer part of the active
   VLM contract.
 - Clarified that `vehicle_state_layer_truck_type` is now a legacy
@@ -175,7 +179,7 @@ The current target-label gate also adds a terminal split:
 - Added `src/yolo-layer/TAG_FILTER_BEHAVIOR.md` as the explicit reference for which YOLO/COCO tags are currently forwarded into the pipeline versus discarded by the repo's class filter.
 - Updated `pipeline_layers_and_interactions.md` to clarify that the bundled detector may know many labels, but downstream behavior depends on the active `class_map.py` filter.
 - Updated `pipeline/README.md` to point readers to the new YOLO tag-policy document when they need to understand or modify detector behavior.
-- Added pipeline-level documentation for `config_vlm_dead_after_lost_frames`, dead-track partial-cache dispatch, and the current terminal split where VLM marks tracks `dead` when `is_truck=false` and `done` when truck semantics are accepted.
+- Added pipeline-level documentation for `config_vlm_dead_after_lost_frames`, dead-track partial-cache dispatch, and the current terminal split where VLM marks tracks `no` when `is_target_vehicle=false` and `done` when target-vehicle semantics are accepted.
 - Refined terminal semantics so VLM rejection of non-flagged labels is now
   tracked as `no`, while `dead` remains reserved for the cropper lost-threshold
   path.

@@ -110,14 +110,14 @@ Minimal structured VLM output target:
   - `source_video`
   - `model_id`
   - `query_type`
-  - `is_type`
+  - `is_target_vehicle`
   - `ack_status`
   - `retry_reasons`
   - `target_class`
 
 Where:
 
-- `is_type` means whether the VLM agrees with the YOLO target tag / type
+- `is_target_vehicle` means whether the VLM agrees that this crop belongs to the active target-vehicle set for the configured backend
 - `retry_reasons` should stay as a short list because it is already part of the ack flow
 - `target_class` is the final normalized downstream class we care about:
   - `pickup`
