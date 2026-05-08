@@ -227,3 +227,86 @@ Current handoff caution:
   once staged.
 - The checkpoint is local-only and should not be committed.
 - Do not commit until the unfinished validation items above are complete.
+
+## 2026-05-08 Grace Run Human Review Utility
+
+Session goal:
+
+- Build a local human-review utility for `data/grace_run_2hour`.
+- Review only images promoted to real GRACE/ViT inference
+  (`grace_skipped=false`), not detector-gated skipped rows.
+- Target about 200 reviewed items for the first pass, not all 2k+ crops.
+- Expose the selected review target count before/inside the GUI.
+- Save review outputs beside the run data under:
+  `data/grace_run_2hour/human_review/`
+- Keep `data/grace_run_2hour/` local and out of git; this clone now has
+  `data/grace_run_2hour/` in `.git/info/exclude`.
+
+Label contract chosen by the user:
+
+- Vehicle/type classification labels:
+  - `correct`
+  - `wrong`
+  - shortcuts: `1`, `2`
+- Extra/axle/detail labels:
+  - `correct_extra`
+  - `wrong_extra`
+  - shortcuts: `q`, `w`
+- Image usability label:
+  - `bad_image_quality`
+  - meaning the image is so poor that a human cannot tell whether the
+    classification is right or wrong
+
+Implementation direction:
+
+- Prefer a GRACE-run-specific app over forcing this run through the older
+  `review-package/runs/...` CSV flow.
+- Reuse `data/grace_run_2hour/grace_results.jsonl` and linked crop images.
+- Make sample selection reproducible and saved, with a resample option later
+  if needed.
+- Produce current label state and summary artifacts in the same local
+  `human_review` folder.
+
+Implemented in this session:
+
+- Added `pipeline/grace_human_review_app.py`.
+- The app reads `data/grace_run_2hour/grace_results.jsonl` directly and
+  samples only promoted GRACE/ViT rows where `grace_skipped=false`.
+- Default review target is `200`, sampled reproducibly with seed `4221`.
+- The generated sample is balanced across promoted detector classes when
+  possible.
+- Runtime outputs are written only under the local ignored run folder:
+  `data/grace_run_2hour/human_review/`.
+- Runtime outputs include:
+  - `review_sample.jsonl`
+  - `review_sample_meta.json`
+  - `human_labels.jsonl`
+  - `human_labels_current.json`
+  - `summary.json`
+  - `summary.md`
+  - `accuracy_summary.png`
+  - `accuracy_summary.svg`
+- The GUI is keyboard-first:
+  - `1` toggles `correct`
+  - `2` toggles `wrong`
+  - `3` toggles `bad_image_quality`
+  - `4` toggles `repetitive`
+  - `q` toggles `correct_extra`
+  - `w` toggles `wrong_extra`
+  - `Enter` advances to the next item
+- All tags are toggles; mutually exclusive label groups still replace the
+  opposite label when needed.
+- Any real tag now counts as reviewed for queue advancement.
+- Each label action writes immediately to both the append-only JSONL history
+  and current JSON state.
+- `Write Summary` regenerates the JSON/Markdown summary and the accuracy plot,
+  then shows the saved plot in the GUI.
+- The plot uses the requested blue palette and intentionally includes only:
+  - total human-review summary
+  - review-by-detector-class summary
+
+Important git hygiene:
+
+- Do not commit `data/grace_run_2hour/` or any derived review artifacts.
+- This session's commit should include only the source utility and this
+  chat-history update.
