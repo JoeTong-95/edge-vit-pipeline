@@ -1,6 +1,9 @@
 chat-history/
 .codex
 
+# Sensitive/local traffic recordings and calibration artifacts.
+/data/
+
 # Python bytecode / caches
 __pycache__/
 *.py[cod]
